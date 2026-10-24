@@ -95,10 +95,11 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix ".noirdebug"
-            resValue "string", "app_label", "Artemis-mic"
-            resValue "string", "app_label_root", "Artemis-mic (Root)"
-            resValue "string", "app_label_game", "Artemis-mic"
+            // Artemis-rotate: own package so it installs next to Artemis-mic (different signing key)
+            applicationIdSuffix ".noirrotate"
+            resValue "string", "app_label", "Artemis-rotate"
+            resValue "string", "app_label_root", "Artemis-rotate (Root)"
+            resValue "string", "app_label_game", "Artemis-rotate"
 
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'

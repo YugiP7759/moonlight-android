@@ -1,0 +1,37 @@
+# Builds the Artemis-rotate debug APK (reconnect on rotation). The signing key comes from the
+# ANDROID_DEBUG_KEYSTORE secret so every build can be installed over the previous one.
+name: Build Artemis-rotate APK
+
+on:
+  push:
+    branches: [rotate]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install NDK
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.0.12077973" > /dev/null
+
+      - name: Stable signing key
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_DEBUG_KEYSTORE }}
+        run: mkdir -p ~/.android && echo "$KEYSTORE" | base64 -d > ~/.android/debug.keystore
+
+      - name: Build
+        run: chmod +x gradlew && ./gradlew assembleNonRoot_gameDebug --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: artemis-rotate-apk
+          path: app/build/outputs/apk/**/*.apk

@@ -184,6 +184,15 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private int displayHeight;
     private int currentOrientation;
 
+    // Reconnect on rotation: the stream resolution is fixed when the connection starts, so when the phone
+    // turns (or the rotate button is used) we reconnect and get a stream in the new orientation. Apollo
+    // keeps the app running, so this is a resume. 0 = off (auto orientation disabled or external display).
+    private int streamOrientation;
+    private int forcedOrientation;
+    private Intent reconnectIntent;
+    private final Handler rotateHandler = new Handler(Looper.getMainLooper());
+    private final Runnable rotateReconnect = this::reconnectForOrientation;
+
     public NvConnection conn;
     private SpinnerDialog spinner;
     private boolean displayedFailureDialog = false;
@@ -269,6 +278,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     public static final String EXTRA_VDISPLAY = "VirtualDisplay";
     public static final String EXTRA_SERVER_COMMANDS = "ServerCommands";
     public static final String EXTRA_DISPLAY_ID = "DisplayID";
+    // Orientation picked with the rotate button, carried over when the stream reconnects after a rotation
+    public static final String EXTRA_FORCED_ORIENTATION = "ForcedOrientation";
 
     public static final String CLIPBOARD_IDENTIFIER = "ArtemisStreaming";
 
@@ -421,7 +432,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 prefConfig.videoScaleMode = PreferenceConfiguration.ScaleMode.STRETCH;
             }
 
-            if (prefConfig.autoOrientation) {
+            forcedOrientation = getIntent().getIntExtra(EXTRA_FORCED_ORIENTATION, 0);
+            if (prefConfig.autoOrientation && forcedOrientation != 0) {
+                currentOrientation = forcedOrientation;
+            } else if (prefConfig.autoOrientation) {
                 currentOrientation = getResources().getConfiguration().orientation;
             } else {
                 currentOrientation = Configuration.ORIENTATION_LANDSCAPE;
@@ -432,6 +446,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
             displayWidth = shouldInvertDecoderResolution ? prefConfig.height : prefConfig.width;
             displayHeight = shouldInvertDecoderResolution ? prefConfig.width : prefConfig.height;
+
+            streamOrientation = prefConfig.autoOrientation ? currentOrientation : 0;
 
             // Enter landscape unless we're on a square screen
             setPreferredOrientationForActivity();
@@ -1145,6 +1161,18 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     }
 
     private void setPreferredOrientationForActivity() {
+        if (streamOrientation != 0) {
+            // Follow the phone (or the rotate button); a mismatch with the stream reconnects in onConfigurationChanged
+            if (forcedOrientation == Configuration.ORIENTATION_LANDSCAPE) {
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE);
+            } else if (forcedOrientation == Configuration.ORIENTATION_PORTRAIT) {
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT);
+            } else {
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_USER);
+            }
+            return;
+        }
+
         Display display = getActiveDisplay(Game.this, prefConfig);
 
         // For semi-square displays, we use more complex logic to determine which orientation to use (if any)
@@ -1190,6 +1218,17 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+
+        if (streamOrientation != 0) {
+            // Wait a moment so a quick turn back and forth doesn't reconnect
+            rotateHandler.removeCallbacks(rotateReconnect);
+            int o = newConfig.orientation;
+            boolean inPip = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode();
+            if (!inPip && o != streamOrientation
+                    && (o == Configuration.ORIENTATION_PORTRAIT || o == Configuration.ORIENTATION_LANDSCAPE)) {
+                rotateHandler.postDelayed(rotateReconnect, 1000);
+            }
+        }
 
         // Set requested orientation for possible new screen size
         setPreferredOrientationForActivity();
@@ -1744,6 +1783,13 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         // Destroy the capture provider
         inputCaptureProvider.destroy();
         streamContainer.onDestroy();
+
+        rotateHandler.removeCallbacks(rotateReconnect);
+        if (reconnectIntent != null) {
+            final Intent intent = reconnectIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+            final Context app = getApplicationContext();
+            new Handler(Looper.getMainLooper()).postDelayed(() -> app.startActivity(intent), 300);
+        }
     }
 
     @Override
@@ -4047,6 +4093,19 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     }
 
     public void rotateScreen() {
+        if (streamOrientation != 0) {
+            forcedOrientation = currentOrientation == Configuration.ORIENTATION_LANDSCAPE
+                    ? Configuration.ORIENTATION_PORTRAIT : Configuration.ORIENTATION_LANDSCAPE;
+            currentOrientation = forcedOrientation;
+            setPreferredOrientationForActivity();
+            // Normally the orientation change reconnects; this covers a device that doesn't actually turn
+            if (forcedOrientation != streamOrientation) {
+                rotateHandler.removeCallbacks(rotateReconnect);
+                rotateHandler.postDelayed(rotateReconnect, 1000);
+            }
+            return;
+        }
+
         if (currentOrientation == Configuration.ORIENTATION_LANDSCAPE) {
             currentOrientation = Configuration.ORIENTATION_PORTRAIT;
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT);
@@ -4054,6 +4113,22 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             currentOrientation = Configuration.ORIENTATION_LANDSCAPE;
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE);
         }
+    }
+
+    private void reconnectForOrientation() {
+        if (!connected || isFinishing()) {
+            return;
+        }
+        Intent intent = new Intent(getIntent());
+        if (forcedOrientation != 0) {
+            intent.putExtra(EXTRA_FORCED_ORIENTATION, forcedOrientation);
+        } else {
+            intent.removeExtra(EXTRA_FORCED_ORIENTATION);
+        }
+        // Game is singleTask, so the new instance is started from onDestroy, once this one is gone
+        reconnectIntent = intent;
+        finish();
+        overridePendingTransition(0, 0);
     }
 
     /**
