@@ -26,7 +26,9 @@ jobs:
       - name: Stable signing key
         env:
           KEYSTORE: ${{ secrets.ANDROID_DEBUG_KEYSTORE }}
-        run: mkdir -p ~/.android && echo "$KEYSTORE" | base64 -d > ~/.android/debug.keystore
+        run: |
+          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/rotate.keystore"
+          echo "ROTATE_KEYSTORE=$RUNNER_TEMP/rotate.keystore" >> "$GITHUB_ENV"
 
       - name: Build
         run: chmod +x gradlew && ./gradlew assembleNonRoot_gameDebug --stacktrace
