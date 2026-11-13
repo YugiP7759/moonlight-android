@@ -321,7 +321,7 @@ public class YugiSessions extends FrameLayout {
                 new YugiSlashMenu.Command("cost", "עלות ושימוש בסשן", false),
                 new YugiSlashMenu.Command("status", "מצב הסשן וההגדרות", false),
                 new YugiSlashMenu.Command("effort", "רמת המאמץ של המודל", true)),
-                cmd -> { String t = "/" + cmd.name + (cmd.takesArg ? " " : ""); input.setText(t); input.setSelection(t.length()); slash.setShown(false); });
+                cmd -> { String t = "/" + cmd.name + (cmd.takesArg ? " " : ""); YugiSessions.this.input.setText(t); YugiSessions.this.input.setSelection(t.length()); YugiSessions.this.slash.setShown(false); });
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         slp.bottomMargin = dp(8);
         dcol.addView(slash, slp);
