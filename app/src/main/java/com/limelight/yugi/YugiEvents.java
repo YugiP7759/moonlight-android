@@ -165,6 +165,10 @@ public final class YugiEvents {
     }
 
     private void dispatch(String event, String data, boolean replay) {
+        if ("media.rect".equals(event)) { // the redirected video moved on the desktop
+            if (!replay) YugiPlayer.onRectEvent(data);
+            return;
+        }
         if ("media".equals(event)) {
             MediaListener ml = mediaListener;
             if (ml == null || replay) return;

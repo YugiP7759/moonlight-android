@@ -78,6 +78,7 @@ public class YugiPlayerTest {
         assertTrue(html.contains("start:61"));
         assertTrue(html.contains("playsinline:1"));
         assertTrue(html.contains("autoplay:1"));
+        assertTrue("YouTube's own full-screen button is shown (it switches our mode)", html.contains("fs:1"));
         assertEquals("https://m.youtube.com/watch?v=abcdefghijk&t=61s", YugiPlayer.youtubeWatchUrl("abcdefghijk", 61.7));
         assertEquals("1:01:05", YugiPlayer.fmt(3665_000));
         assertEquals("0:07", YugiPlayer.fmt(7_400));
@@ -151,6 +152,126 @@ public class YugiPlayerTest {
             c.drawRect((300 + i * 800f / cols.length) * sx, 200 * sy, (300 + (i + 1) * 800f / cols.length) * sx, 650 * sy, p);
         }
         return b;
+    }
+
+    @Test
+    public void pageGeometry() throws Exception {
+        RectF stream = new RectF(0, 0, 1920, 1080);
+        // unclamped: a video scrolled half above the screen keeps its size
+        RectF m = YugiPlayer.mapDesk(new float[]{100, -270, 960, 540, 1920, 1080}, stream);
+        assertEquals(-270, m.top, 0.01);
+        assertEquals(540, m.height(), 0.01);
+        assertEquals(0.5f, YugiPlayer.visibleFraction(m, stream), 0.001f);
+        assertEquals(0f, YugiPlayer.visibleFraction(new RectF(0, -600, 100, -10), stream), 0f);
+        RectF mini = YugiPlayer.miniRect(16f / 9f, 1080, 2400, 0, 0, 120, 40, 840, false);
+        assertEquals(2400 - 120 - 40, mini.bottom, 0.01);
+        assertEquals(1080 - 40, mini.right, 0.01);
+        assertEquals(16f / 9f, mini.width() / mini.height(), 0.01);
+        RectF left = YugiPlayer.miniRect(16f / 9f, 1080, 2400, 30, 0, 0, 40, 840, true);
+        assertEquals(70, left.left, 0.01);
+        RectF in = YugiPlayer.fitInto(16f / 9f, new RectF(100, 100, 500, 500));
+        assertEquals(300, in.centerY(), 0.01);
+        assertEquals(400, in.width(), 0.01);
+        YugiPlayer.RectUpdate u = YugiPlayer.RectUpdate.parse(new JSONObject("{\"id\":\"q\",\"hidden\":true}"));
+        assertTrue(u.hidden);
+        assertNull(YugiPlayer.RectUpdate.parse(new JSONObject("{\"rect\":{}}")));
+    }
+
+    /**
+     * Opens in the page (never full screen by itself), follows the page, docks as mini off screen,
+     * toggles full screen, Back collapses, and touches outside the player go to the stream.
+     */
+    @Test @Config(qualifiers = "w750dp-h832dp-port-420dpi")
+    public void inPageMode() throws Exception {
+        Activity a = Robolectric.buildActivity(Activity.class).setup().get();
+        FrameLayout root = new FrameLayout(a);
+        a.setContentView(root);
+        View stream = new View(a) {
+            @Override protected void onDraw(Canvas c) { c.drawBitmap(desktop(getWidth(), getHeight()), 0, 0, null); }
+        };
+        root.addView(stream, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        YugiPlayer p = YugiPlayer.attach(a, new YugiPlayer.Host() {
+            @Override public void capture(YugiChat.BitmapCallback cb) { cb.onBitmap(desktop(stream.getWidth(), stream.getHeight())); }
+            @Override public View streamView() { return stream; }
+            @Override public void onPlayerClosed() {}
+        });
+        View decor = a.getWindow().getDecorView();
+        int w = a.getResources().getDisplayMetrics().widthPixels, h = a.getResources().getDisplayMetrics().heightPixels;
+        layout(decor, w, h);
+        p.open(YugiPlayer.Request.parse(new JSONObject(
+                "{\"kind\":\"mp4\",\"id\":\"q\",\"url\":\"https://example.com/a.mp4\","
+                        + "\"rect\":{\"x\":300,\"y\":200,\"w\":800,\"h\":450,\"sw\":1920,\"sh\":1080},"
+                        + "\"view\":{\"x\":0,\"y\":100,\"w\":1920,\"h\":980,\"sw\":1920,\"sh\":1080}}")));
+        layout(decor, w, h);
+        shadowOf(Looper.getMainLooper()).idle();
+        assertTrue(p.isOpen());
+        assertFalse("opens in the page", p.isFullForTest());
+        float sx = stream.getWidth() / 1920f, sy = stream.getHeight() / 1080f;
+        RectF shown = p.shownForTest();
+        assertEquals(300 * sx, shown.left, 2);
+        assertEquals(200 * sy, shown.top, 2);
+        assertEquals(800 * sx, shown.width(), 2);
+        // outside the player: the stream gets it; inside: the player
+        assertTrue(p.passesThroughForTest(shown.left - 20, shown.bottom + 40));
+        assertFalse(p.passesThroughForTest(shown.centerX(), shown.centerY()));
+        snap(decor, w, h, "player-inpage");
+
+        // the page scrolls 150 desktop px: the player follows (springs settle when the looper runs)
+        p.updateRect(YugiPlayer.RectUpdate.parse(new JSONObject(
+                "{\"id\":\"q\",\"rect\":{\"x\":300,\"y\":50,\"w\":800,\"h\":450,\"sw\":1920,\"sh\":1080},"
+                        + "\"view\":{\"x\":0,\"y\":100,\"w\":1920,\"h\":980,\"sw\":1920,\"sh\":1080}}")));
+        settle();
+        shown = p.shownForTest();
+        assertEquals("clipped to the browser viewport, not over the tab strip", 100 * sy, shown.top, 2);
+        assertEquals(500 * sy, shown.bottom, 2);
+        snap(decor, w, h, "player-inpage-scrolled");
+        // another redirect's rect is ignored
+        p.updateRect(YugiPlayer.RectUpdate.parse(new JSONObject("{\"id\":\"other\",\"hidden\":true}")));
+        settle();
+        assertFalse(p.isMiniForTest());
+
+        // scrolled off the screen: docked mini, still playing
+        p.updateRect(YugiPlayer.RectUpdate.parse(new JSONObject(
+                "{\"id\":\"q\",\"rect\":{\"x\":300,\"y\":-500,\"w\":800,\"h\":450,\"sw\":1920,\"sh\":1080}}")));
+        settle();
+        assertTrue(p.isMiniForTest());
+        assertTrue(p.isOpen());
+        shown = p.shownForTest();
+        assertTrue("mini at the bottom " + shown, shown.bottom > h * 0.8f && shown.bottom <= h);
+        snap(decor, w, h, "player-mini");
+
+        // full screen and Back
+        p.toggleFullForTest();
+        settle();
+        assertTrue(p.isFullForTest());
+        shown = p.shownForTest();
+        assertEquals(0, shown.left, 1);
+        assertEquals(w, shown.right, 1);
+        assertFalse("full screen owns the screen", p.passesThroughForTest(5, 5));
+        snap(decor, w, h, "player-full");
+        p.close(); // Back
+        settle();
+        assertTrue("Back collapses, the video keeps playing", p.isOpen());
+        assertFalse(p.isFullForTest());
+        p.close(); // Back again: back to the desktop
+        settle();
+        assertFalse(p.isOpen());
+    }
+
+    private static void settle() {
+        for (int i = 0; i < 120; i++) {
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(16));
+        }
+    }
+
+    private static void snap(View decor, int w, int h, String name) throws Exception {
+        layout(decor, w, h);
+        OUT.mkdirs();
+        Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        decor.draw(new Canvas(b));
+        try (FileOutputStream o = new FileOutputStream(new File(OUT, name + ".png"))) {
+            b.compress(Bitmap.CompressFormat.PNG, 100, o);
+        }
     }
 
     @Test

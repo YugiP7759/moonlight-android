@@ -53,6 +53,7 @@ import com.limelight.LimeLog;
 
 import org.json.JSONObject;
 
+import java.lang.ref.WeakReference;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -61,11 +62,18 @@ import java.util.Map;
  * Hybrid stage 2: a video that starts on the server desktop plays here, decoded by the phone.
  * <p>
  * The desktop extension reports the video (event "media"); this opens a native player above the stream
- * without touching the stream itself. Transition: a hero cut out of the current stream frame at the
- * video's place grows on a spring to full screen, and the real player crossfades in on its first frame,
- * so there is never an empty or black frame. Dragging down (or back) closes it on a spring back to its
- * place, and the position goes back to the server ({@code POST /media/state closed}), where the
- * desktop video seeks to it. The springs can be interrupted at any point (grab while opening, etc.).
+ * without touching the stream itself. By default it stays exactly on the video's rect in the page, so it
+ * looks like the video simply plays inside the desktop: a hero cut out of the current stream frame holds
+ * the place and the real player crossfades in on its first frame (never an empty or black frame). The
+ * extension reports every move of the video (event "media.rect": scroll, resize, tab hidden) and the
+ * player follows it, clipped to the browser viewport; when the video is mostly off screen it docks as a
+ * mini player in a bottom corner (tap: full screen) and comes back when the video scrolls back in.
+ * Touches outside the player go to the stream as usual.
+ * <p>
+ * Full screen is a mode on a spring (Apple-like, interruptible): the 48dp button opposite the close
+ * button, YouTube's own full-screen button, or a tap on the mini player. Back or dragging down in full
+ * screen collapses it back into the page; Back in the page, or the close button, ends it: the position
+ * goes back to the server ({@code POST /media/state closed}), where the desktop video seeks to it.
  * <p>
  * YouTube runs in a WebView embed (IFrame API, autoplay, start=t, playsinline) with m.youtube.com/watch as
  * the fallback; mp4 / HLS run in media3 ExoPlayer. While the player is open the stream audio is ducked.
@@ -79,11 +87,14 @@ public final class YugiPlayer {
         public final double t;
         /** Video rect in desktop pixels, and the desktop size; w == 0 when unknown. */
         public final float x, y, w, h, sw, sh;
+        /** The browser viewport (x, y, w, h, sw, sh) in desktop pixels, or null when unknown. */
+        final float[] view;
 
         Request(String kind, String id, String vid, String url, String pageUrl, String title, double t,
-                float x, float y, float w, float h, float sw, float sh) {
+                float x, float y, float w, float h, float sw, float sh, float[] view) {
             this.kind = kind; this.id = id; this.vid = vid; this.url = url; this.pageUrl = pageUrl;
             this.title = title; this.t = t; this.x = x; this.y = y; this.w = w; this.h = h; this.sw = sw; this.sh = sh;
+            this.view = view;
         }
 
         /** null if the event is not something this player can open. */
@@ -108,10 +119,57 @@ public final class YugiPlayer {
                 sw = (float) r.optDouble("sw", 0); sh = (float) r.optDouble("sh", 0);
                 if (w < 2 || h < 2 || sw < 2 || sh < 2) { w = h = 0; }
             }
-            return new Request(kind, id, vid, url, o.optString("pageUrl"), o.optString("title"), t, x, y, w, h, sw, sh);
+            return new Request(kind, id, vid, url, o.optString("pageUrl"), o.optString("title"), t, x, y, w, h, sw, sh,
+                    deskRect(o.optJSONObject("view")));
         }
 
         boolean hasRect() { return w > 0 && h > 0; }
+    }
+
+    /** {x, y, w, h, sw, sh} of a rect in desktop pixels, or null when missing / degenerate. */
+    static float[] deskRect(JSONObject r) {
+        if (r == null) return null;
+        float[] v = {(float) r.optDouble("x", 0), (float) r.optDouble("y", 0), (float) r.optDouble("w", 0),
+                (float) r.optDouble("h", 0), (float) r.optDouble("sw", 0), (float) r.optDouble("sh", 0)};
+        for (float f : v) if (Float.isNaN(f) || Float.isInfinite(f)) return null;
+        return v[2] < 2 || v[3] < 2 || v[4] < 2 || v[5] < 2 ? null : v;
+    }
+
+    /** Event "media.rect": the redirected video moved on the desktop (scroll, resize) or left the screen. */
+    static final class RectUpdate {
+        final String id;
+        final boolean hidden;
+        final float[] rect, view; // deskRect, null when unknown
+
+        RectUpdate(String id, boolean hidden, float[] rect, float[] view) {
+            this.id = id; this.hidden = hidden; this.rect = rect; this.view = view;
+        }
+
+        static RectUpdate parse(JSONObject o) {
+            String id = o.optString("id");
+            if (id.isEmpty()) return null;
+            float[] r = deskRect(o.optJSONObject("rect"));
+            boolean hidden = o.optBoolean("hidden", false) || r == null;
+            return new RectUpdate(id, hidden, r, deskRect(o.optJSONObject("view")));
+        }
+    }
+
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
+    private static WeakReference<YugiPlayer> current = new WeakReference<>(null);
+
+    /** YugiEvents: event "media.rect" (any thread). The open player follows the video. */
+    public static void onRectEvent(String json) {
+        final RectUpdate u;
+        try {
+            u = RectUpdate.parse(new JSONObject(json));
+        } catch (Exception e) {
+            return;
+        }
+        if (u == null) return;
+        MAIN.post(() -> {
+            YugiPlayer p = current.get();
+            if (p != null) p.updateRect(u);
+        });
     }
 
     // ---------------------------------------------------------------- geometry (pure, unit tested)
@@ -127,6 +185,33 @@ public final class YugiPlayer {
         return out.width() >= 8 && out.height() >= 8 ? out : null;
     }
 
+    /** A desktop rect {x, y, w, h, sw, sh} on the phone, unclamped (it may reach past the stream). */
+    static RectF mapDesk(float[] d, RectF stream) {
+        if (d == null || stream.width() <= 0 || stream.height() <= 0) return null;
+        float sx = stream.width() / d[4], sy = stream.height() / d[5];
+        return new RectF(stream.left + d[0] * sx, stream.top + d[1] * sy,
+                stream.left + (d[0] + d[2]) * sx, stream.top + (d[1] + d[3]) * sy);
+    }
+
+    /** Share of {@code r} inside {@code clip} (0..1). */
+    static float visibleFraction(RectF r, RectF clip) {
+        if (r == null || clip == null || r.width() <= 0 || r.height() <= 0) return 0f;
+        RectF i = new RectF(r);
+        if (!i.intersect(clip)) return 0f;
+        return (i.width() * i.height()) / (r.width() * r.height());
+    }
+
+    /** The docked mini player: a bottom corner of a w x h layer, clear of the system bars. */
+    static RectF miniRect(float aspect, float w, float h, float insetL, float insetR, float insetB,
+                          float margin, float maxW, boolean left) {
+        if (aspect <= 0) aspect = 16f / 9f;
+        float mw = Math.min(maxW, w * (w > h ? 0.3f : 0.46f)), mh = mw / aspect;
+        if (mh > h * 0.4f) { mh = h * 0.4f; mw = mh * aspect; }
+        float l = left ? insetL + margin : w - insetR - margin - mw;
+        float b = h - insetB - margin;
+        return new RectF(l, b - mh, l + mw, b);
+    }
+
     /** The video rect when fitted (letterboxed) into a box of w x h. */
     static RectF fit(float aspect, float w, float h) {
         if (aspect <= 0 || w <= 0 || h <= 0) return new RectF(0, 0, w, h);
@@ -134,6 +219,13 @@ public final class YugiPlayer {
         if (vh > h) { vh = h; vw = h * aspect; }
         float l = (w - vw) / 2f, t = (h - vh) / 2f;
         return new RectF(l, t, l + vw, t + vh);
+    }
+
+    /** {@link #fit} inside a box placed anywhere. */
+    static RectF fitInto(float aspect, RectF box) {
+        RectF r = fit(aspect, box.width(), box.height());
+        r.offset(box.left, box.top);
+        return r;
     }
 
     /** Linear blend of two rects (p = 0 -> a, 1 -> b). */
@@ -150,7 +242,7 @@ public final class YugiPlayer {
                 + "</head><body><div id=p></div><script>"
                 + "var t0=" + String.format(Locale.US, "%.3f", Math.max(0, t)) + ",pl,timer;"
                 + "function onYouTubeIframeAPIReady(){pl=new YT.Player('p',{videoId:'" + vid + "',width:'100%',height:'100%',"
-                + "playerVars:{autoplay:1,playsinline:1,start:" + start + ",rel:0,modestbranding:1,fs:0,origin:'" + YT_ORIGIN + "'},"
+                + "playerVars:{autoplay:1,playsinline:1,start:" + start + ",rel:0,modestbranding:1,fs:1,origin:'" + YT_ORIGIN + "'},"
                 + "events:{onReady:function(e){if(t0-" + start + ">0.5)e.target.seekTo(t0,true);e.target.playVideo();"
                 + "timer=setInterval(function(){try{Yugi.onTime(pl.getCurrentTime())}catch(x){}},1000)},"
                 + "onStateChange:function(e){try{Yugi.onState(e.data,pl.getCurrentTime())}catch(x){}},"
@@ -172,6 +264,11 @@ public final class YugiPlayer {
     static final long FIRST_FRAME_TIMEOUT_MS = 12000;
     static final float DUCK_VOLUME = 0.15f;
     static final float CLOSE_DRAG_DP = 110f, CLOSE_FLING_DP_S = 900f;
+    /** Following the page while it scrolls: stiff and critically damped, so it never wobbles behind it. */
+    static final float FOLLOW_STIFFNESS = 900f;
+    /** Mini player when less than this share of the video is in the viewport, back above the second. */
+    static final float MINI_ENTER = 0.25f, MINI_EXIT = 0.4f;
+    static final float MINI_MAX_DP = 320f, MINI_MARGIN_DP = 16f, MINI_RADIUS_DP = 12f;
 
     /** Game hooks. */
     public interface Host {
@@ -194,27 +291,41 @@ public final class YugiPlayer {
     private final ImageView hero;
     private final FrameLayout content;
     private final View closeBtn;
-    private final FrameLayout closeWrap; // flight fade (applyGeometry); closeBtn itself fades with the controls
-    private boolean closeShown;
-    private int safeLeft, safeTop, safeRight;
-    private final Runnable hideClose = () -> setCloseShown(false);
+    private final FullButton fsBtn;
+    // positioned on the spring (placeChrome); the buttons inside fade with the controls
+    private final FrameLayout closeWrap, fsWrap;
+    private boolean chromeShown;
+    private int safeLeft, safeTop, safeRight, safeBottom;
+    private final Runnable hideChrome = () -> setChromeShown(false);
     private final Controls controls;
 
     private Request req;
-    private RectF source;          // video rect on the stream (layer coordinates), may be null
     private float aspect = 16f / 9f;
-    private float progress;        // 0 = at the source rect, 1 = full screen
-    private float dragY;           // finger offset while dragging down
+    private float progress;        // 0 = in the page (or docked mini), 1 = full screen
+    private boolean full;          // the mode progress is heading to
+    private float dragY;           // finger offset while dragging down (full screen)
     private boolean closing;
     private boolean firstFrame;
     private double lastT;          // last known position (s)
     private boolean ytFallback;
+    private View focusBeforeFull;
+
+    // where the video is on the desktop (updated by "media.rect"; req itself never changes while open)
+    private float[] deskVideo, deskView;
+    private boolean deskHidden, mini;
+    private RectF lastStream;
+    /** Shown place when not full screen, in layer px: video box l,t,r,b; viewport clip l,t,r,b; corner radius. */
+    private final float[] fv = new float[9];
+    private boolean hasSrc;
+    // the card's current transform (applyGeometry), for the clip and hit tests
+    private float scaleNow = 1f, txNow, tyNow;
 
     private ExoPlayer exo;
     private TextureView texture;
     private WebView web;
 
     private final SpringAnimation progressSpring, dragSpring;
+    private final SpringAnimation[] followSprings = new SpringAnimation[9];
 
     private YugiPlayer(Activity a, Host h) {
         activity = a;
@@ -237,7 +348,8 @@ public final class YugiPlayer {
         card.setOutlineProvider(new ViewOutlineProvider() {
             @Override public void getOutline(View v, Outline o) {
                 RectF c = clipRect();
-                float r = YugiTheme.dp(a, 14) * (1f - progress);
+                float r = hasSrc ? fv[8] / Math.max(0.05f, scaleNow) : YugiTheme.dp(a, 14);
+                r *= 1f - Math.max(0f, Math.min(1f, progress));
                 o.setRoundRect(Math.round(c.left), Math.round(c.top), Math.round(c.right), Math.round(c.bottom), r);
             }
         });
@@ -254,29 +366,36 @@ public final class YugiPlayer {
         controls = new Controls(a);
         layer.addView(controls.root, match());
 
+        int touch = YugiTheme.dp(a, YugiTheme.TOUCH);
+        // both always above the video (WebView / texture), in the two top corners of what is shown
+        fsBtn = new FullButton(a);
+        fsBtn.setOnClickListener(v -> setFull(!full));
+        fsWrap = new FrameLayout(a);
+        fsWrap.addView(fsBtn, new FrameLayout.LayoutParams(touch, touch));
+        fsBtn.setVisibility(View.GONE);
+        layer.addView(fsWrap, new FrameLayout.LayoutParams(touch, touch, Gravity.TOP | Gravity.LEFT));
+
         closeBtn = new CloseButton(a);
         closeBtn.setContentDescription("סגירה");
-        closeBtn.setOnClickListener(v -> close());
-        int touch = YugiTheme.dp(a, YugiTheme.TOUCH);
-        // always above the video (WebView / texture); in a corner kept free of YouTube's title and controls
+        closeBtn.setOnClickListener(v -> closeNow());
         closeWrap = new FrameLayout(a);
         closeWrap.addView(closeBtn, new FrameLayout.LayoutParams(touch, touch));
         closeBtn.setVisibility(View.GONE);
-        layer.addView(closeWrap, new FrameLayout.LayoutParams(touch, touch, Gravity.TOP | Gravity.START));
-        placeClose();
+        layer.addView(closeWrap, new FrameLayout.LayoutParams(touch, touch, Gravity.TOP | Gravity.LEFT));
         layer.setOnApplyWindowInsetsListener((v, ins) -> {
             // safe area: system bars and the camera cutout
             int l = ins.getSystemWindowInsetLeft(), t = ins.getSystemWindowInsetTop(), r = ins.getSystemWindowInsetRight();
+            int b = ins.getSystemWindowInsetBottom();
             if (Build.VERSION.SDK_INT >= 28 && ins.getDisplayCutout() != null) {
                 l = Math.max(l, ins.getDisplayCutout().getSafeInsetLeft());
                 t = Math.max(t, ins.getDisplayCutout().getSafeInsetTop());
                 r = Math.max(r, ins.getDisplayCutout().getSafeInsetRight());
+                b = Math.max(b, ins.getDisplayCutout().getSafeInsetBottom());
             }
-            if (l != safeLeft || t != safeTop || r != safeRight) {
-                safeLeft = l; safeTop = t; safeRight = r;
-                placeClose();
+            if (l != safeLeft || t != safeTop || r != safeRight || b != safeBottom) {
+                safeLeft = l; safeTop = t; safeRight = r; safeBottom = b;
                 layoutTexture();
-                applyGeometry();
+                retarget(false);
             }
             return ins;
         });
@@ -289,13 +408,22 @@ public final class YugiPlayer {
         });
         dragSpring = new SpringAnimation(this, DRAG);
         dragSpring.setSpring(new SpringForce(0f).setStiffness(STIFFNESS).setDampingRatio(DAMPING));
+        for (int i = 0; i < followSprings.length; i++) {
+            final int k = i;
+            SpringAnimation s = new SpringAnimation(this, new FloatPropertyCompat<YugiPlayer>("place" + k) {
+                @Override public float getValue(YugiPlayer p) { return p.fv[k]; }
+                @Override public void setValue(YugiPlayer p, float v) { p.fv[k] = v; p.applyGeometry(); }
+            });
+            s.setSpring(new SpringForce().setStiffness(FOLLOW_STIFFNESS).setDampingRatio(1f));
+            s.setMinimumVisibleChange(DynamicAnimation.MIN_VISIBLE_CHANGE_PIXELS);
+            followSprings[k] = s;
+        }
 
         layer.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
             if ((r - l) != (or - ol) || (b - t) != (ob - ot)) {
                 // fold / rotate: the player stays, only its geometry follows the new window
-                source = computeSource();
                 layoutTexture();
-                applyGeometry();
+                retarget(false);
             }
         });
     }
@@ -305,6 +433,12 @@ public final class YugiPlayer {
         YugiPlayer p = new YugiPlayer(a, h);
         a.addContentView(p.layer, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
+        // the stream view moving or zooming (no layout pass) moves the video with it
+        p.layer.getViewTreeObserver().addOnPreDrawListener(() -> {
+            p.checkStreamMoved();
+            return true;
+        });
+        current = new WeakReference<>(p);
         return p;
     }
 
@@ -314,8 +448,9 @@ public final class YugiPlayer {
 
     /** A new video from the desktop (UI thread). Replaces the current one if open. */
     public void open(Request r) {
+        if (req != null && r.id.equals(req.id)) return; // the same redirect again: already playing
         if (req != null) {
-            // already showing something: swap the content in place (no flight from the desktop)
+            // already showing something: swap the content in place, in the same mode
             YugiEvents.postMediaState(req.id, "closed", currentTime(), null);
             releaseContent();
             req = r;
@@ -324,7 +459,12 @@ public final class YugiPlayer {
             ytFallback = false;
             content.setAlpha(0f);
             closing = false;
-            progressSpring.animateToFinalPosition(1f);
+            takeDesk(r);
+            if (r.hasRect()) aspect = r.w / r.h;
+            layoutTexture();
+            retarget(true);
+            if (!hasSrc) full = true;
+            progressSpring.animateToFinalPosition(full ? 1f : 0f);
             startContent();
             YugiEvents.postMediaState(r.id, "opened", r.t, null);
             return;
@@ -334,22 +474,26 @@ public final class YugiPlayer {
         closing = false;
         firstFrame = false;
         ytFallback = false;
+        // the shape the user sees on the stream, so the player lands exactly on it
         aspect = r.hasRect() ? r.w / r.h : 16f / 9f;
+        takeDesk(r);
+        mini = false;
+        hasSrc = false;
+        lastStream = null;
+        full = false;
+        progress = 0f;
+        dragY = 0f;
+        fsBtn.setFull(false);
         layer.bringToFront();
         YugiTheme.raiseOverlays((ViewGroup) layer.getParent(), layer); // toolbar, chat and Yugi stay above the video
         layer.setVisibility(View.VISIBLE);
-        layer.requestFocus();
-        source = computeSource();
-        // start with the shape the user sees on the stream, so the hero lands exactly on it
-        if (source != null) aspect = source.width() / source.height();
-        progress = 0f;
-        dragY = 0f;
+        retarget(false); // no size yet on the very first open: the layout listener places it
         content.setAlpha(0f);
         hero.setImageBitmap(null);
         hero.setAlpha(1f);
         controls.hide(false);
         setDuck(true);
-        startContent(); // load in parallel with the flight: the first frame comes sooner
+        startContent(); // load at once: the first frame comes sooner
         YugiEvents.postMediaState(r.id, "opened", r.t, null);
 
         final Request opening = r;
@@ -357,10 +501,36 @@ public final class YugiPlayer {
             if (req != opening || closing) return;
             Bitmap crop = cropHero(bmp, opening);
             if (crop != null) hero.setImageBitmap(crop);
+            retarget(false);
+            // no place in the page (the desktop sent no rect): full screen, as a flight from the middle
+            if (!hasSrc) setFull(true);
             applyGeometry();
-            progressSpring.animateToFinalPosition(1f);
         });
         applyGeometry();
+    }
+
+    private void takeDesk(Request r) {
+        deskVideo = r.hasRect() ? new float[]{r.x, r.y, r.w, r.h, r.sw, r.sh} : null;
+        deskView = r.view;
+        deskHidden = false;
+    }
+
+    /** "media.rect": the video moved on the desktop; the player follows it (or docks / comes back). */
+    void updateRect(RectUpdate u) {
+        if (req == null || closing || !u.id.equals(req.id)) return;
+        if (u.hidden) {
+            deskHidden = true;
+        } else {
+            deskHidden = false;
+            deskVideo = u.rect;
+            if (u.view != null) deskView = u.view;
+            // YouTube's box is what the embed fills: a new shape (theatre mode, resize) is the new aspect
+            if (web != null && !ytFallback && deskVideo != null) {
+                float a = deskVideo[2] / deskVideo[3];
+                if (Math.abs(a - aspect) > aspect * 0.01f) { aspect = a; layoutTexture(); }
+            }
+        }
+        retarget(true);
     }
 
     private Bitmap cropHero(Bitmap frame, Request r) {
@@ -376,28 +546,112 @@ public final class YugiPlayer {
         }
     }
 
-    private RectF computeSource() {
+    /** The stream view's bounds on the layer, or null. */
+    private RectF streamOnLayer() {
         View sv = host.streamView();
-        if (req == null || sv == null || sv.getWidth() <= 0) return null;
+        if (sv == null || sv.getWidth() <= 0) return null;
         int[] a = new int[2], b = new int[2];
         sv.getLocationInWindow(a);
         layer.getLocationInWindow(b);
         float sx = sv.getScaleX(), sy = sv.getScaleY();
-        RectF stream = new RectF(a[0] - b[0], a[1] - b[1],
-                a[0] - b[0] + sv.getWidth() * sx, a[1] - b[1] + sv.getHeight() * sy);
-        return mapRect(req, stream);
+        return new RectF(a[0] - b[0], a[1] - b[1], a[0] - b[0] + sv.getWidth() * sx, a[1] - b[1] + sv.getHeight() * sy);
+    }
+
+    private void checkStreamMoved() {
+        if (req == null || closing) return;
+        RectF s = streamOnLayer();
+        if (s == null || s.equals(lastStream)) return;
+        boolean first = lastStream == null;
+        lastStream = s;
+        if (!first) retarget(false);
+    }
+
+    /**
+     * Where the player sits when not full screen (layer px, see {@link #fv}). False when there is no place
+     * in the page for it (no rect from the desktop, no stream yet).
+     */
+    private boolean computeTarget(float[] out) {
+        RectF stream = streamOnLayer();
+        if (req == null || stream == null || layer.getWidth() <= 0) return false;
+        RectF src = mapDesk(deskVideo, stream);
+        if (src == null) return false;
+        RectF clip = mapDesk(deskView, stream);
+        if (clip == null) clip = new RectF(stream);
+        else if (!clip.intersect(stream)) clip.set(src.left, src.top, src.left, src.top);
+        float vis = deskHidden ? 0f : visibleFraction(src, clip);
+        mini = mini ? vis < MINI_EXIT : vis < MINI_ENTER;
+        if (mini) {
+            float w = layer.getWidth(), h = layer.getHeight();
+            boolean left = layer.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL; // the "end" corner
+            src = miniRect(aspect, w, h, safeLeft, safeRight, safeBottom, YugiTheme.dp(activity, MINI_MARGIN_DP),
+                    YugiTheme.dp(activity, MINI_MAX_DP), left);
+            clip = new RectF(0, 0, w, h);
+        }
+        out[0] = src.left; out[1] = src.top; out[2] = src.right; out[3] = src.bottom;
+        out[4] = clip.left; out[5] = clip.top; out[6] = clip.right; out[7] = clip.bottom;
+        out[8] = mini ? YugiTheme.dp(activity, MINI_RADIUS_DP) : 0f;
+        return true;
+    }
+
+    /** Moves the in-page place to the latest target: at once, or on the follow spring. */
+    private void retarget(boolean animate) {
+        float[] t = new float[9];
+        boolean wasMini = mini;
+        if (!computeTarget(t)) { applyGeometry(); return; }
+        if (!hasSrc || !animate) {
+            for (SpringAnimation s : followSprings) s.cancel();
+            System.arraycopy(t, 0, fv, 0, 9);
+            hasSrc = true;
+        } else {
+            // following the page: stiff, no bounce; docking / undocking: the same spring as the modes
+            boolean modeChange = wasMini != mini;
+            for (int i = 0; i < 9; i++) {
+                followSprings[i].getSpring().setStiffness(modeChange ? STIFFNESS : FOLLOW_STIFFNESS)
+                        .setDampingRatio(modeChange ? DAMPING : 1f);
+                followSprings[i].animateToFinalPosition(t[i]);
+            }
+        }
+        if (mini && !full) controls.hide(true);
+        applyGeometry();
+    }
+
+    // ---------------------------------------------------------------- modes
+
+    /** Full screen on / off, on the spring (interruptible). Without a place in the page, off means close. */
+    private void setFull(boolean on) {
+        if (req == null || closing) return;
+        if (!on && !hasSrc) { closeNow(); return; }
+        full = on;
+        fsBtn.setFull(on);
+        if (on) {
+            focusBeforeFull = activity.getCurrentFocus();
+            layer.requestFocus();
+        } else {
+            restoreFocus();
+            dragSpring.animateToFinalPosition(0f);
+        }
+        if (firstFrame) setChromeShown(true);
+        progressSpring.animateToFinalPosition(on ? 1f : 0f);
+    }
+
+    /** In the page the stream keeps the keyboard focus; full screen takes it while it lasts. */
+    private void restoreFocus() {
+        View f = focusBeforeFull;
+        focusBeforeFull = null;
+        if (layer.hasFocus()) layer.clearFocus();
+        if (f != null && f.isAttachedToWindow()) f.requestFocus();
     }
 
     // ---------------------------------------------------------------- geometry
 
     private RectF fullVideo() {
         float w = Math.max(1, layer.getWidth()), h = Math.max(1, layer.getHeight());
-        // the YouTube embed draws its title and controls over its own box: keep the close corner outside it
+        // the YouTube embed draws its title and controls over its own box: keep the button corners outside it
         if (req != null && "youtube".equals(req.kind) && !ytFallback) return fitClearOfCorner(aspect, w, h, closeBand());
         return fit(aspect, w, h);
     }
 
-    /** Space the close button needs from the top / side edge (margin + 48dp + gap, plus the safe inset). */
+    /** Space a corner button needs from the top / side edge (margin + 48dp + gap, plus the safe inset). */
     private float closeBand() {
         return YugiTheme.dp(activity, 12 + YugiTheme.TOUCH + 8) + Math.max(safeTop, Math.max(safeLeft, safeRight));
     }
@@ -414,43 +668,49 @@ public final class YugiPlayer {
         return r;
     }
 
-    private void placeClose() {
-        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) closeWrap.getLayoutParams();
-        int m = YugiTheme.dp(activity, 12);
-        lp.topMargin = m + safeTop;
-        lp.leftMargin = m + safeLeft;
-        lp.rightMargin = m + safeRight;
-        if (Build.VERSION.SDK_INT >= 17) { lp.setMarginStart(lp.leftMargin); lp.setMarginEnd(lp.rightMargin); }
-        closeWrap.setLayoutParams(lp);
-    }
-
-    /** The close button shows with the controls and fades after a few seconds; any touch brings it back. */
-    private void setCloseShown(boolean on) {
-        ui.removeCallbacks(hideClose);
-        if (on) ui.postDelayed(hideClose, 3500);
-        if (on == closeShown) return;
-        closeShown = on;
-        closeBtn.animate().cancel();
-        if (on) {
-            if (closeBtn.getVisibility() != View.VISIBLE) { closeBtn.setAlpha(0f); closeBtn.setVisibility(View.VISIBLE); }
-            closeBtn.animate().alpha(1f).setDuration(180).start();
-        } else {
-            closeBtn.animate().alpha(0f).setDuration(220)
-                    .withEndAction(() -> { if (!closeShown) closeBtn.setVisibility(View.GONE); }).start();
+    /** The buttons show with the controls and fade after a few seconds; any touch brings them back. */
+    private void setChromeShown(boolean on) {
+        ui.removeCallbacks(hideChrome);
+        if (on) ui.postDelayed(hideChrome, 3500);
+        if (on == chromeShown) return;
+        chromeShown = on;
+        for (View b : new View[]{closeBtn, fsBtn}) {
+            b.animate().cancel();
+            if (on) {
+                if (b.getVisibility() != View.VISIBLE) { b.setAlpha(0f); b.setVisibility(View.VISIBLE); }
+                b.animate().alpha(1f).setDuration(180).start();
+            } else {
+                b.animate().alpha(0f).setDuration(220)
+                        .withEndAction(() -> { if (!chromeShown) b.setVisibility(View.GONE); }).start();
+            }
         }
     }
 
     /** The visible part of the card, in the card's own (unscaled) coordinates. */
     private RectF clipRect() {
         RectF full = new RectF(0, 0, Math.max(1, layer.getWidth()), Math.max(1, layer.getHeight()));
-        return lerp(fullVideo(), full, progress);
+        RectF base = fullVideo();
+        if (hasSrc && scaleNow > 0.0001f) {
+            // the browser viewport (layer px) seen from inside the card: the player never covers the tab strip
+            RectF c = new RectF((fv[4] - txNow) / scaleNow, (fv[5] - tyNow) / scaleNow,
+                    (fv[6] - txNow) / scaleNow, (fv[7] - tyNow) / scaleNow);
+            if (!base.intersect(c)) base.set(base.left, base.top, base.left, base.top);
+        }
+        return lerp(base, full, Math.max(0f, Math.min(1f, progress)));
     }
 
-    /** Places the card for the current progress / drag: uniform scale from the source to full screen. */
+    /** What the user sees of the player, in layer px. */
+    private RectF visibleOnLayer() {
+        RectF c = clipRect();
+        return new RectF(c.left * scaleNow + txNow, c.top * scaleNow + tyNow, c.right * scaleNow + txNow, c.bottom * scaleNow + tyNow);
+    }
+
+    /** Places the card for the current progress / drag: uniform scale from the place in the page to full screen. */
     private void applyGeometry() {
         if (layer.getWidth() <= 0) return;
         RectF video = fullVideo();
-        RectF src = source != null ? source : shrunkCenter(video);
+        // the video keeps its shape inside its box in the page (like object-fit: contain on the desktop)
+        RectF src = hasSrc ? fitInto(aspect, new RectF(fv[0], fv[1], fv[2], fv[3])) : shrunkCenter(video);
         float s0 = src.width() / video.width();
         float scale = s0 + (1f - s0) * progress;
         // video rect origin moves from src to its full-screen place
@@ -464,6 +724,7 @@ public final class YugiPlayer {
         tx = cx + (tx - cx) * dragScale;
         ty = cy + (ty - cy) * dragScale + d;
         scale *= dragScale;
+        scaleNow = scale; txNow = tx; tyNow = ty;
         card.setScaleX(scale);
         card.setScaleY(scale);
         card.setTranslationX(tx);
@@ -479,12 +740,34 @@ public final class YugiPlayer {
         }
         float dragFade = 1f - Math.min(1f, d / (h * 0.6f));
         scrim.setAlpha(Math.max(0f, Math.min(1f, progress)) * dragFade);
-        float chrome = Math.max(0f, (progress - 0.85f) / 0.15f) * dragFade;
-        closeWrap.setAlpha(chrome);
-        closeWrap.setVisibility(chrome > 0.02f ? View.VISIBLE : View.INVISIBLE);
+        placeChrome(dragFade);
     }
 
-    /** Without a source rect: start from a small centered copy (still a spring, never a cut). */
+    /** Buttons in the top corners of what is shown (in the page) or of the screen (full), on the same spring. */
+    private void placeChrome(float alpha) {
+        RectF vis = visibleOnLayer();
+        float w = layer.getWidth(), p = Math.max(0f, Math.min(1f, progress));
+        int touch = YugiTheme.dp(activity, YugiTheme.TOUCH), m = YugiTheme.dp(activity, 6), fm = YugiTheme.dp(activity, 12);
+        boolean rtl = layer.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
+        // close at the start corner (as before), full screen at the end corner
+        float inStart = rtl ? vis.right - m - touch : vis.left + m, inEnd = rtl ? vis.left + m : vis.right - m - touch;
+        float fStart = rtl ? w - fm - safeRight - touch : fm + safeLeft, fEnd = rtl ? fm + safeLeft : w - fm - safeRight - touch;
+        float y = vis.top + m + (fm + safeTop - vis.top - m) * p;
+        closeWrap.setTranslationX(inStart + (fStart - inStart) * p);
+        fsWrap.setTranslationX(inEnd + (fEnd - inEnd) * p);
+        closeWrap.setTranslationY(y);
+        fsWrap.setTranslationY(y);
+        // a video too small for two buttons side by side shows none (a tap there opens full screen when mini)
+        boolean fits = p > 0.5f || (vis.width() >= 2 * touch + 3 * m && vis.height() >= touch + 2 * m);
+        int vv = fits && alpha > 0.02f ? View.VISIBLE : View.INVISIBLE;
+        for (View wrap : new View[]{closeWrap, fsWrap}) {
+            wrap.setAlpha(alpha);
+            if (wrap.getVisibility() != vv) wrap.setVisibility(vv);
+        }
+        if (exo != null) controls.place(vis, p);
+    }
+
+    /** Without a place in the page: start from a small centered copy (still a spring, never a cut). */
     private static RectF shrunkCenter(RectF video) {
         float s = 0.86f;
         float w = video.width() * s, h = video.height() * s;
@@ -517,7 +800,7 @@ public final class YugiPlayer {
     private void onFirstFrame() {
         if (firstFrame || req == null) return;
         firstFrame = true;
-        setCloseShown(true);
+        setChromeShown(true);
         content.animate().alpha(1f).setDuration(CROSSFADE_MS).start();
         hero.animate().alpha(0f).setDuration(CROSSFADE_MS).setStartDelay(40).start();
         YugiEvents.postMediaState(req.id, "playing", currentTime(), null);
@@ -591,7 +874,16 @@ public final class YugiPlayer {
             ws.setJavaScriptEnabled(true);
             ws.setDomStorageEnabled(true);
             ws.setMediaPlaybackRequiresUserGesture(false);
-            web.setWebChromeClient(new WebChromeClient());
+            web.setWebChromeClient(new WebChromeClient() {
+                // YouTube's own full-screen button switches our mode; the page itself never goes full screen
+                @Override public void onShowCustomView(View view, CustomViewCallback cb) {
+                    ui.post(() -> {
+                        try { cb.onCustomViewHidden(); } catch (Throwable ignored) {}
+                        setFull(!full);
+                    });
+                }
+                @Override public void onHideCustomView() {}
+            });
             web.addJavascriptInterface(new YtBridge(), "Yugi");
             web.setWebViewClient(new WebViewClient() {
                 @Override public void onPageFinished(WebView v, String url) {
@@ -609,6 +901,7 @@ public final class YugiPlayer {
         if (fallback) {
             LimeLog.info("YugiPlayer: youtube embed failed, watch page fallback");
             web.loadUrl(youtubeWatchUrl(req.vid, lastT));
+            setFull(true); // a whole watch page does not fit the video's box in the page
         } else {
             web.loadDataWithBaseURL(YT_BASE, youtubeHtml(req.vid, req.t), "text/html", "utf-8", null);
         }
@@ -672,8 +965,18 @@ public final class YugiPlayer {
 
     // ---------------------------------------------------------------- close
 
-    /** Spring back to the video's place on the desktop, then hand the position back to the server. */
+    /**
+     * Back (Game): full screen collapses back into the page; in the page (or mini) the video goes back to
+     * the desktop, as with the close button.
+     */
     public void close() {
+        if (req == null || closing) return;
+        if (full && hasSrc) { setFull(false); return; }
+        closeNow();
+    }
+
+    /** Ends it: back to the video's place on the desktop, then the position goes back to the server. */
+    private void closeNow() {
         if (req == null || closing) return;
         double t = currentTime();
         if (web != null && ytFallback) {
@@ -690,14 +993,13 @@ public final class YugiPlayer {
         closing = true;
         if (exo != null) exo.pause();
         controls.hide(true);
-        setCloseShown(false);
-        // the hero goes back over the player so the flight ends on the desktop frame
+        setChromeShown(false);
+        restoreFocus();
         hero.animate().cancel();
-        hero.setAlpha(hero.getDrawable() != null ? 1f : 0f);
         content.animate().cancel();
-        content.animate().alpha(hero.getDrawable() != null ? 0f : 1f).setDuration(160).start();
-        source = computeSource();
-        if (!animate || layer.getWidth() <= 0) {
+        // the player itself flies back (the frame cut at the start would be stale by now)
+        if (firstFrame) { hero.setAlpha(0f); content.setAlpha(1f); }
+        if (!animate || layer.getWidth() <= 0 || progress <= 0.001f) {
             progressSpring.cancel();
             finishClose();
             return;
@@ -712,8 +1014,11 @@ public final class YugiPlayer {
             layer.setAlpha(1f);
             releaseContent();
             hero.setImageBitmap(null);
+            for (SpringAnimation s : followSprings) s.cancel();
             req = null;
             closing = false;
+            full = false;
+            hasSrc = false;
             setDuck(false);
             host.onPlayerClosed();
         }).start();
@@ -723,10 +1028,13 @@ public final class YugiPlayer {
     public void release() {
         progressSpring.cancel();
         dragSpring.cancel();
+        for (SpringAnimation s : followSprings) s.cancel();
         if (req != null) {
             YugiEvents.postMediaState(req.id, "closed", currentTime(), null);
             req = null;
         }
+        full = false;
+        hasSrc = false;
         releaseContent();
         layer.setVisibility(View.GONE);
         setDuck(false);
@@ -740,12 +1048,27 @@ public final class YugiPlayer {
         return new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
     }
 
-    // ---------------------------------------------------------------- touch: drag down to close
+    // ---------------------------------------------------------------- touch
+
+    /** True when a touch at (x, y) is not for the player: in the page, outside what it shows. */
+    private boolean passesThrough(float x, float y) {
+        if (req == null) return true;
+        if (closing) return true;
+        if (full || progress > 0.5f) return false; // full screen owns the screen
+        if (visibleOnLayer().contains(x, y)) return false;
+        return !(hits(closeWrap, closeBtn, x, y) || hits(fsWrap, fsBtn, x, y));
+    }
+
+    private static boolean hits(View wrap, View btn, float x, float y) {
+        if (wrap.getVisibility() != View.VISIBLE || btn.getVisibility() != View.VISIBLE) return false;
+        float l = wrap.getLeft() + wrap.getTranslationX(), t = wrap.getTop() + wrap.getTranslationY();
+        return x >= l && x < l + wrap.getWidth() && y >= t && y < t + wrap.getHeight();
+    }
 
     private final class Layer extends FrameLayout {
         private final int slop;
         private float downX, downY, lastY;
-        private boolean dragging;
+        private boolean dragging, passing, miniTap;
         private VelocityTracker vt;
 
         Layer(Context c) {
@@ -759,21 +1082,35 @@ public final class YugiPlayer {
             return web != null && ytFallback && web.canScrollVertically(-1);
         }
 
+        @Override public boolean dispatchTouchEvent(MotionEvent e) {
+            // in the page, a touch outside the player goes to the stream (the whole gesture: we refuse its down)
+            if (e.getActionMasked() == MotionEvent.ACTION_DOWN) passing = passesThrough(e.getX(), e.getY());
+            if (passing) return false;
+            return super.dispatchTouchEvent(e);
+        }
+
         @Override public boolean onInterceptTouchEvent(MotionEvent e) {
             if (req == null) return false;
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
-                    if (!closing) setCloseShown(true); // any touch brings the close button back
+                    if (!closing) setChromeShown(true); // any touch brings the buttons back
                     downX = e.getX(); downY = lastY = e.getY();
                     dragging = false;
-                    if (progressSpring.isRunning() || dragSpring.isRunning()) {
+                    miniTap = false;
+                    if (closing) return false;
+                    if (!full && mini && hasSrc && !hits(closeWrap, closeBtn, downX, downY) && !hits(fsWrap, fsBtn, downX, downY)) {
+                        miniTap = true; // the docked mini player: a tap opens full screen
+                        return true;
+                    }
+                    if (full && (progressSpring.isRunning() || dragSpring.isRunning())) {
                         // grab mid-flight: the spring stops where it is and the finger takes over
-                        if (!closing) { progressSpring.cancel(); dragSpring.cancel(); dragging = true; startVt(e); return true; }
+                        progressSpring.cancel(); dragSpring.cancel(); dragging = true; startVt(e); return true;
                     }
                     return false;
                 case MotionEvent.ACTION_MOVE:
                     float dy = e.getY() - downY, dx = e.getX() - downX;
-                    if (!closing && dy > slop && dy > Math.abs(dx) * 1.5f && !contentScrolledDown()) {
+                    // dragging down only in full screen; in the page the video stays a plain part of it
+                    if (full && !closing && dy > slop && dy > Math.abs(dx) * 1.5f && !contentScrolledDown()) {
                         dragging = true;
                         lastY = e.getY();
                         startVt(e);
@@ -794,16 +1131,20 @@ public final class YugiPlayer {
         @SuppressLint("ClickableViewAccessibility")
         @Override public boolean onTouchEvent(MotionEvent e) {
             if (req == null) return false;
+            if (miniTap) {
+                if (e.getActionMasked() == MotionEvent.ACTION_UP
+                        && Math.hypot(e.getX() - downX, e.getY() - downY) < slop * 2) setFull(true);
+                return true;
+            }
             if (!dragging) {
                 if (e.getActionMasked() == MotionEvent.ACTION_UP && exo != null) controls.toggle();
-                return true; // nothing under the player gets touches (the stream stays as it was)
+                return true; // nothing under the player gets touches inside it
             }
             if (vt != null) vt.addMovement(e);
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_MOVE:
                     dragY = Math.max(0f, dragY + (e.getY() - lastY));
                     lastY = e.getY();
-                    if (progress < 1f) progress = Math.min(1f, progress); // keep a grabbed flight where it is
                     applyGeometry();
                     return true;
                 case MotionEvent.ACTION_UP:
@@ -812,11 +1153,12 @@ public final class YugiPlayer {
                     float vy = 0;
                     if (vt != null) { vt.computeCurrentVelocity(1000); vy = vt.getYVelocity(); vt.recycle(); vt = null; }
                     float dp = getResources().getDisplayMetrics().density;
-                    boolean shouldClose = dragY > CLOSE_DRAG_DP * dp || vy > CLOSE_FLING_DP_S * dp;
-                    if (shouldClose) {
-                        close();
+                    boolean collapse = dragY > CLOSE_DRAG_DP * dp || vy > CLOSE_FLING_DP_S * dp;
+                    dragSpring.setStartVelocity(vy);
+                    if (collapse) {
+                        setFull(false); // back into the page (closes when there is no place for it there)
+                        dragSpring.animateToFinalPosition(0f);
                     } else {
-                        dragSpring.setStartVelocity(vy);
                         dragSpring.animateToFinalPosition(0f);
                         progressSpring.animateToFinalPosition(1f);
                     }
@@ -863,7 +1205,59 @@ public final class YugiPlayer {
         }
     }
 
-    /** Minimal ExoPlayer controls: play / pause and a scrubber with times, on a glass bar. */
+    /** Glass circle with four corners: out = full screen, in = back into the page. */
+    private static final class FullButton extends View {
+        private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG), stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path path = new Path();
+        private boolean isFull;
+
+        FullButton(Context c) {
+            super(c);
+            fill.setColor(0x73000000);
+            stroke.setColor(YugiTheme.TEXT);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeWidth(YugiTheme.dp(c, 2.2f));
+            stroke.setStrokeCap(Paint.Cap.ROUND);
+            stroke.setStrokeJoin(Paint.Join.ROUND);
+            setClickable(true);
+            setFocusable(true);
+            setFull(false);
+        }
+
+        void setFull(boolean on) {
+            isFull = on;
+            setContentDescription(on ? "יציאה ממסך מלא" : "מסך מלא");
+            invalidate();
+        }
+
+        @Override protected void onDraw(Canvas c) {
+            float w = getWidth(), h = getHeight(), r = Math.min(w, h) / 2f * 0.8f;
+            c.drawCircle(w / 2f, h / 2f, r, fill);
+            float a = r * 0.44f, len = r * 0.26f;
+            path.reset();
+            for (int sx = -1; sx <= 1; sx += 2) {
+                for (int sy = -1; sy <= 1; sy += 2) {
+                    if (!isFull) {
+                        // corners at the edge of the square, arms pointing back in
+                        float x = w / 2f + sx * a, y = h / 2f + sy * a;
+                        path.moveTo(x - sx * len, y); path.lineTo(x, y); path.lineTo(x, y - sy * len);
+                    } else {
+                        // corners near the middle, arms pointing out
+                        float x = w / 2f + sx * a * 0.4f, y = h / 2f + sy * a * 0.4f;
+                        path.moveTo(x + sx * len, y); path.lineTo(x, y); path.lineTo(x, y + sy * len);
+                    }
+                }
+            }
+            c.drawPath(path, stroke);
+        }
+
+        @Override public void setPressed(boolean p) {
+            super.setPressed(p);
+            animate().scaleX(p ? 0.9f : 1f).scaleY(p ? 0.9f : 1f).setDuration(p ? 60 : 160).start();
+        }
+    }
+
+    /** Minimal ExoPlayer controls: play / pause and a scrubber with times, on a glass bar over the video. */
     private final class Controls {
         final FrameLayout root;
         private final FrameLayout bar;
@@ -926,15 +1320,26 @@ public final class YugiPlayer {
             if (Build.VERSION.SDK_INT >= 17) { slp.setMarginStart(slp.leftMargin); slp.setMarginEnd(slp.rightMargin); }
             bar.addView(seek, slp);
 
+            // placed over the shown video by place() (in the page or full screen)
             FrameLayout.LayoutParams blp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
-            int m = YugiTheme.dp(c, 16);
-            blp.leftMargin = blp.rightMargin = m;
-            blp.bottomMargin = YugiTheme.dp(c, 20);
+                    ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.LEFT);
             root.addView(bar, blp);
             bar.setAlpha(0f);
             bar.setVisibility(View.GONE);
             bar.setLayoutDirection(View.LAYOUT_DIRECTION_LTR); // a timeline runs left to right
+        }
+
+        /** Bottom of the shown video {@code vis} (layer px); margins grow towards full screen ({@code p} = 1). */
+        void place(RectF vis, float p) {
+            Context c = root.getContext();
+            int side = YugiTheme.dp(c, 8 + 8 * p), bottom = YugiTheme.dp(c, 8 + 12 * p);
+            int touch = YugiTheme.dp(c, YugiTheme.TOUCH);
+            int w = Math.max(touch * 3, Math.round(vis.width() - 2 * side));
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) bar.getLayoutParams();
+            if (lp.width != w) { lp.width = w; bar.setLayoutParams(lp); }
+            int bh = bar.getHeight() > 0 ? bar.getHeight() : touch + YugiTheme.dp(c, 8);
+            bar.setTranslationX(vis.left + side);
+            bar.setTranslationY(vis.bottom - bottom - bh);
         }
 
         void attach(ExoPlayer player) {
@@ -948,7 +1353,8 @@ public final class YugiPlayer {
             if (p == null) return;
             shown = true;
             bar.setVisibility(View.VISIBLE);
-            bar.animate().alpha(1f).translationY(0).setDuration(180).start();
+            applyGeometry(); // places the bar over the video as it is shown now
+            bar.animate().alpha(1f).setDuration(180).start();
             ui.removeCallbacks(tick);
             ui.post(tick);
             kick();
@@ -991,4 +1397,14 @@ public final class YugiPlayer {
     View layerForTest() { return layer; }
 
     void setProgressForTest(float p) { progress = p; applyGeometry(); }
+
+    boolean isFullForTest() { return full; }
+
+    boolean isMiniForTest() { return mini; }
+
+    void toggleFullForTest() { setFull(!full); }
+
+    boolean passesThroughForTest(float x, float y) { return passesThrough(x, y); }
+
+    RectF shownForTest() { return visibleOnLayer(); }
 }
