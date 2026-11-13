@@ -171,7 +171,7 @@ public class YugiSessions extends FrameLayout {
         detailSubtitle.setMaxLines(1);
         detailSubtitle.setEllipsize(TextUtils.TruncateAt.END);
         detailSubtitle.setTextAlignment(TEXT_ALIGNMENT_VIEW_START);
-        detailSubtitle.setPadding(dp(6), 0, 0, 0);
+        detailSubtitle.setPaddingRelative(dp(6), 0, 0, 0);
         subRow.addView(detailSubtitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         dtitles.addView(subRow);
         dhead.addView(dtitles, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
