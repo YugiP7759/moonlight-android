@@ -40,7 +40,7 @@ public class YugiKeyboard extends View {
     private static final long FADE_MS = 140;
 
     // palette (YugiTheme family)
-    private static final int PANEL = 0xF20F131A;
+    private static final int PANEL = 0xFF0F131A; // opaque: the desktop's edge never shows through
     private static final int KEY = 0xFF2B313C;
     private static final int KEY_DARK = 0xFF1C212A;
     private static final int KEY_PRESSED = 0xFF4B5466;
@@ -59,6 +59,7 @@ public class YugiKeyboard extends View {
     private float rowH, gap, padX, padTop, padBottom, radius, headroom;
     private float[] kl = new float[0], kt = new float[0], kr = new float[0], kb = new float[0];
     private float[] textSize = new float[0];
+    private float[] fnSize = new float[0];
     private float hintSize, bubbleTextSize;
     private int screenH;
 
@@ -168,6 +169,7 @@ public class YugiKeyboard extends View {
         if (kl.length != n) {
             kl = new float[n]; kt = new float[n]; kr = new float[n]; kb = new float[n];
             textSize = new float[n];
+            fnSize = new float[n];
             pressT = new float[n];
             releasedAt = new long[n];
             holdCount = new int[n];
@@ -188,17 +190,23 @@ public class YugiKeyboard extends View {
             kr[i] = padX + (k.x + k.units) * unit - gap;
             kt[i] = rowTop[k.row];
             kb[i] = kt[i] + rowH * layout.rowHeights[k.row];
-            float size = (k.kind == YugiKeyLayout.CHAR && k.us != ' ') ? base : rowH * 0.3f;
+            boolean glyph = k.label != null && k.label.codePointCount(0, k.label.length()) == 1; // ⇧ ⌫ ← ⌨
+            float size = (k.kind == YugiKeyLayout.CHAR && k.us != ' ') || glyph ? base : rowH * 0.3f;
             if (layout.rowHeights[k.row] < 1f) size *= 0.92f;
             // fit the widest label this key can show (no text ever touches the key edge)
             float room = (kr[i] - kl[i]) - 8 * dp;
             textPaint.setTextSize(size);
             float widest = Math.max(width(k.label), Math.max(width(k.enLower), width(k.enUpper)));
-            widest = Math.max(widest, Math.max(width(k.he), width(k.fnLabel)));
+            widest = Math.max(widest, width(k.he));
             if (k.kind == YugiKeyLayout.CHAR && k.us == ' ') widest = Math.max(width("English"), width("עברית"));
             if (k.kind == YugiKeyLayout.ACTION) widest = Math.max(widest, Math.max(width("EN"), width("עב")));
             if (widest > room && widest > 0) size *= room / widest;
             textSize[i] = size;
+            // F-keys fit on their own, so "0" keeps the size of the other digits
+            float fs = rowH * 0.3f;
+            textPaint.setTextSize(fs);
+            float fw = width(k.fnLabel);
+            fnSize[i] = fw > room && fw > 0 ? fs * room / fw : fs;
         }
     }
 
@@ -209,6 +217,7 @@ public class YugiKeyboard extends View {
     public int keyCount() { return layout.keys.size(); }
     public YugiKeyLayout layout() { return layout; }
     public float textSizeOf(int i) { return textSize[i]; }
+    public float fnSizeOf(int i) { return fnSize[i]; }
     public Paint textPaintForTest() { return textPaint; }
 
     private static float clamp(float v, float lo, float hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -244,7 +253,7 @@ public class YugiKeyboard extends View {
 
             String label = YugiKeyLayout.label(k, heb, shift, caps, fn);
             if (label == null) continue;
-            textPaint.setTextSize(textSize[i]);
+            textPaint.setTextSize(fn && k.fnLabel != null ? fnSize[i] : textSize[i]);
             textPaint.setColor(modOn ? YugiTheme.ACCENT : (k.kind == YugiKeyLayout.CHAR && k.us != ' ' ? YugiTheme.TEXT : YugiTheme.TEXT_DIM));
             float cx = (kl[i] + kr[i]) * 0.5f, cy = (kt[i] + kb[i]) * 0.5f;
             c.drawText(label, cx, cy - (textPaint.ascent() + textPaint.descent()) * 0.5f, textPaint);
@@ -515,10 +524,8 @@ public class YugiKeyboard extends View {
         removeCallbacks(longPress);
         removeCallbacks(repeatTick);
         repeatPointer = longPressPointer = -1;
-        for (int p = 0; p < MAXP; p++) {
-            if (pKey[p] >= 0) release(pKey[p]);
-            pKey[p] = -1;
-        }
+        for (int p = 0; p < MAXP; p++) pKey[p] = -1;
+        for (int i = 0; i < pressT.length; i++) { pressT[i] = 0; holdCount[i] = 0; }
         altPointer = bubblePointer = -1;
         alts = null;
         engine.reset();

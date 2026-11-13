@@ -172,10 +172,10 @@ public class YugiKeyboardScreenshotTest {
             for (RectF o : rects) if (RectF.intersects(o, r)) problems.add(name + ": keys overlap at " + i);
             rects.add(r);
             YugiKeyLayout.Key k = l.keys.get(i);
-            p.setTextSize(kb.textSizeOf(i));
             for (boolean heb : new boolean[]{false, true}) for (boolean sh : new boolean[]{false, true}) for (boolean fn : new boolean[]{false, true}) {
                 String s = YugiKeyLayout.label(k, heb, sh, false, fn);
                 if (s == null) continue;
+                p.setTextSize(fn && k.fnLabel != null ? kb.fnSizeOf(i) : kb.textSizeOf(i));
                 float tw = p.measureText(s);
                 if (tw > r.width() - 2 * pad) problems.add(name + ": label '" + s + "' (" + tw + "px) wider than key " + r.width());
                 if (-p.ascent() + p.descent() > r.height()) problems.add(name + ": label '" + s + "' taller than key");
