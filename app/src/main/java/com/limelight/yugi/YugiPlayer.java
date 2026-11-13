@@ -315,6 +315,8 @@ public final class YugiPlayer {
         layer.setVisibility(View.VISIBLE);
         layer.requestFocus();
         source = computeSource();
+        // start with the shape the user sees on the stream, so the hero lands exactly on it
+        if (source != null) aspect = source.width() / source.height();
         progress = 0f;
         dragY = 0f;
         content.setAlpha(0f);
