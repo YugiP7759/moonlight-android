@@ -5,6 +5,8 @@
 
 #include <arpa/inet.h>
 #include <string.h>
+#include <stdlib.h>
+#include "yugi_utf8.h"
 
 #include "minisdl.h"
 #include "controller_type.h"
@@ -125,9 +127,22 @@ Java_com_limelight_nvstream_jni_MoonBridge_sendMouseHighResHScroll(JNIEnv *env, 
 
 JNIEXPORT void JNICALL
 Java_com_limelight_nvstream_jni_MoonBridge_sendUtf8Text(JNIEnv *env, jclass clazz, jstring text) {
-    const char* utf8Text = (*env)->GetStringUTFChars(env, text, NULL);
-    LiSendUtf8TextEvent(utf8Text, strlen(utf8Text));
-    (*env)->ReleaseStringUTFChars(env, text, utf8Text);
+    // Not GetStringUTFChars: that is JNI "modified UTF-8", where every character above U+FFFF
+    // (almost all emoji) becomes two 3-byte surrogates that the host decodes as garbage.
+    jsize len = (*env)->GetStringLength(env, text);
+    const jchar* utf16 = (*env)->GetStringChars(env, text, NULL);
+    if (utf16 == NULL) {
+        return;
+    }
+    char* utf8 = malloc((size_t) len * 3 + 1);
+    if (utf8 != NULL) {
+        size_t n = yugiUtf16ToUtf8(utf16, (size_t) len, utf8);
+        if (n > 0) {
+            LiSendUtf8TextEvent(utf8, (unsigned int) n);
+        }
+        free(utf8);
+    }
+    (*env)->ReleaseStringChars(env, text, utf16);
 }
 
 JNIEXPORT void JNICALL
