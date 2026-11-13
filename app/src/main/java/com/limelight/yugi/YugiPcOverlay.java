@@ -31,20 +31,13 @@ public final class YugiPcOverlay {
             if (o.keyboardAction != null) o.keyboardAction.run();
         });
         buttons.add(o.keyboardButton);
+        YugiChrome.Button[] mic = new YugiChrome.Button[1];
+        YugiChrome.Button[] cam = new YugiChrome.Button[1];
         if (YugiMedia.isAvailable()) {
-            YugiChrome.Button[] mic = new YugiChrome.Button[1];
-            mic[0] = new YugiChrome.Button(YugiMedia.isMicOn() ? R.drawable.yugi_ic_mic : R.drawable.yugi_ic_mic_off,
-                    "מיקרופון", () -> {
-                YugiMedia.setMic(!YugiMedia.isMicOn());
-                mic[0].setIcon(YugiMedia.isMicOn() ? R.drawable.yugi_ic_mic : R.drawable.yugi_ic_mic_off);
-            });
+            // On demand: they turn on when a desktop app uses them (YugiMedia); a tap overrides
+            mic[0] = new YugiChrome.Button(R.drawable.yugi_ic_mic_off, "מיקרופון", YugiMedia::toggleMic);
             buttons.add(mic[0]);
-            YugiChrome.Button[] cam = new YugiChrome.Button[1];
-            cam[0] = new YugiChrome.Button(YugiMedia.isCamOn() ? R.drawable.yugi_ic_videocam : R.drawable.yugi_ic_videocam_off,
-                    "מצלמה", () -> {
-                YugiMedia.setCam(!YugiMedia.isCamOn());
-                cam[0].setIcon(YugiMedia.isCamOn() ? R.drawable.yugi_ic_videocam : R.drawable.yugi_ic_videocam_off);
-            });
+            cam[0] = new YugiChrome.Button(R.drawable.yugi_ic_videocam_off, "מצלמה", YugiMedia::toggleCam);
             buttons.add(cam[0]);
             buttons.add(new YugiChrome.Button(R.drawable.yugi_ic_switch_camera, "החלפת מצלמה", YugiMedia::switchCamera));
         }
@@ -53,6 +46,20 @@ public final class YugiPcOverlay {
                         new YugiNav.Item("המחשב שלי", true, null),
                         new YugiNav.Item("משחקים", false, openGames)), o.chrome.getReservedTop())));
         o.chrome = YugiChrome.attach(a, buttons);
+        if (mic[0] != null) {
+            YugiMedia.Listener ml = (micOn, camOn) -> {
+                mic[0].setIcon(micOn ? R.drawable.yugi_ic_mic : R.drawable.yugi_ic_mic_off);
+                mic[0].setLive(micOn ? YugiChrome.LIVE_MIC : 0);
+                cam[0].setIcon(camOn ? R.drawable.yugi_ic_videocam : R.drawable.yugi_ic_videocam_off);
+                cam[0].setLive(camOn ? YugiChrome.LIVE_CAMERA : 0);
+            };
+            ml.onMediaState(YugiMedia.isMicOn(), YugiMedia.isCamOn());
+            YugiMedia.addListener(ml);
+            o.chrome.addOnAttachStateChangeListener(new android.view.View.OnAttachStateChangeListener() {
+                @Override public void onViewAttachedToWindow(android.view.View v) { YugiMedia.addListener(ml); }
+                @Override public void onViewDetachedFromWindow(android.view.View v) { YugiMedia.removeListener(ml); }
+            });
+        }
         o.chat = YugiChat.attach(a, new YugiChat.Host() {
             @Override public void captureScreen(YugiChat.BitmapCallback cb) { capture(surface, cb); }
             @Override public void pickFile() { YugiChat.openPicker(a); }

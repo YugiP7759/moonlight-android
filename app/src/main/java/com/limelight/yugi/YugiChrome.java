@@ -52,6 +52,9 @@ public class YugiChrome extends FrameLayout {
         Runnable onLongClick;
         boolean active;
         ImageButton view;
+        int liveColor;      // 0 = no live dot
+        View dot;           // small dot on the button's corner (in the chrome, follows the bar)
+        YugiChrome owner;
 
         public Button(int icon, String label, Runnable onClick) {
             this.icon = icon;
@@ -70,7 +73,20 @@ public class YugiChrome extends FrameLayout {
             active = on;
             if (view != null) YugiTheme.setActive(view, on);
         }
+
+        /**
+         * A small dot on the button's corner while something runs live (the phone camera or mic for the
+         * desktop); {@code color} 0 hides it. Comes and goes on a spring, also shown on the collapsed handle.
+         */
+        public void setLive(int color) {
+            liveColor = color;
+            if (owner != null) owner.updateDots();
+        }
     }
+
+    /** iOS privacy-indicator colors. */
+    public static final int LIVE_CAMERA = 0xFF30D158;
+    public static final int LIVE_MIC = 0xFFFF9F0A;
 
     public interface ReservedTopListener { void onReservedTop(int px); }
 
@@ -78,6 +94,7 @@ public class YugiChrome extends FrameLayout {
     private final LinearLayout bar;
     private final ImageButton handle;
     private final TextView hud;
+    private final View handleDot;
     private final List<Button> buttons = new ArrayList<>();
     private boolean collapsed;
     private boolean autoHide = true;
@@ -149,8 +166,13 @@ public class YugiChrome extends FrameLayout {
             if (i > 0) lp.leftMargin = dp(4);
             bar.addView(v, lp);
             buttons.add(b);
+            b.owner = this;
         }
         addView(bar, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        for (Button b : buttons) {
+            b.dot = makeDot(ctx);
+            addView(b.dot, new LayoutParams(dp(DOT), dp(DOT)));
+        }
 
         handle = YugiTheme.iconButton(ctx, com.limelight.R.drawable.yugi_ic_more, "סרגל YugiPC");
         GradientDrawable hbg = new GradientDrawable();
@@ -175,6 +197,57 @@ public class YugiChrome extends FrameLayout {
         hud.setBackground(YugiTheme.roundedStroke(ctx, YugiTheme.GLASS, 16, YugiTheme.STROKE));
         hud.setVisibility(GONE);
         addView(hud, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        handleDot = makeDot(ctx);
+        addView(handleDot, new LayoutParams(dp(DOT), dp(DOT)));
+    }
+
+    private static final int DOT = 8; // dp
+
+    private View makeDot(Context ctx) {
+        View d = new View(ctx);
+        GradientDrawable g = new GradientDrawable();
+        g.setShape(GradientDrawable.OVAL);
+        g.setColor(LIVE_CAMERA);
+        g.setStroke(dp(1.5f), YugiTheme.BRAND_BG); // reads on the light icon and on the dark glass
+        d.setBackground(g);
+        d.setClickable(false);
+        d.setFocusable(false);
+        d.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        d.setElevation(dp(7)); // above the bar
+        d.setAlpha(0f);
+        d.setScaleX(0f);
+        d.setScaleY(0f);
+        return d;
+    }
+
+    private static void springDot(View d, boolean on, int color) {
+        if (on && d.getBackground() instanceof GradientDrawable) ((GradientDrawable) d.getBackground()).setColor(color);
+        YugiSpring.to(d, androidx.dynamicanimation.animation.DynamicAnimation.SCALE_X, on ? 1f : 0f);
+        YugiSpring.to(d, androidx.dynamicanimation.animation.DynamicAnimation.SCALE_Y, on ? 1f : 0f);
+        YugiSpring.to(d, androidx.dynamicanimation.animation.DynamicAnimation.ALPHA, on ? 1f : 0f);
+    }
+
+    /** Live dots: on the buttons while the bar is open, on the handle while it is collapsed. */
+    void updateDots() {
+        int handleColor = 0;
+        for (Button b : buttons) {
+            if (b.liveColor == LIVE_CAMERA || (handleColor == 0 && b.liveColor != 0)) handleColor = b.liveColor;
+            springDot(b.dot, b.liveColor != 0 && !collapsed, b.liveColor);
+        }
+        springDot(handleDot, handleColor != 0 && collapsed, handleColor);
+        positionDots();
+    }
+
+    private void positionDots() {
+        float inset = dp(7);
+        for (Button b : buttons) {
+            if (b.view == null) continue;
+            b.dot.setTranslationX(bar.getTranslationX() + b.view.getRight() - inset - b.dot.getWidth() / 2f);
+            b.dot.setTranslationY(bar.getTranslationY() + b.view.getTop() + inset - b.dot.getHeight() / 2f);
+        }
+        handleDot.setTranslationX(handle.getTranslationX() + handle.getWidth() - inset - handleDot.getWidth() / 2f);
+        handleDot.setTranslationY(handle.getTranslationY() + inset - handleDot.getHeight() / 2f);
     }
 
     /** Adds the chrome over an activity's content. */
@@ -211,6 +284,7 @@ public class YugiChrome extends FrameLayout {
         collapsed = c;
         bar.setVisibility(c ? GONE : VISIBLE);
         handle.setVisibility(c ? VISIBLE : GONE);
+        updateDots();
         if (placed && !dragging) {
             // a tap during a snap: finish at the resting spot so the opened bar is fully on screen
             springX.animateToFinalPosition(restX(dockRight));
@@ -258,6 +332,8 @@ public class YugiChrome extends FrameLayout {
         // Children sit at the origin; their place on screen is a translation (so springs never relayout)
         bar.layout(0, 0, barW, barH);
         handle.layout(0, 0, handle.getMeasuredWidth(), handle.getMeasuredHeight());
+        for (Button bt : buttons) bt.dot.layout(0, 0, bt.dot.getMeasuredWidth(), bt.dot.getMeasuredHeight());
+        handleDot.layout(0, 0, handleDot.getMeasuredWidth(), handleDot.getMeasuredHeight());
         if (!placed || w != lastW || h != lastH || barW != lastBarW || barH != lastBarH) {
             // first layout, rotation, fold/unfold: back to the remembered side and height, inside the screen
             placed = true;
@@ -308,6 +384,7 @@ public class YugiChrome extends FrameLayout {
         bar.setTranslationY(gy);
         handle.setTranslationX(gx + handleOffsetX());
         handle.setTranslationY(gy + (bar.getHeight() - handle.getHeight()) / 2f);
+        positionDots();
     }
 
     /** True when (x, y) is on the visible part (bar or handle), in chrome coordinates. */

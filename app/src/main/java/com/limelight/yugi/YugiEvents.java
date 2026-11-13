@@ -58,6 +58,9 @@ public final class YugiEvents {
     public void setMediaListener(MediaListener l) { mediaListener = l; }
 
     private static final long READ_TIMEOUT_S = 50;
+    /** After the stream drops, the server's media demand counts as gone unless a reconnect replays it in time. */
+    private static final long DEMAND_GRACE_MS = 3000;
+    private final Runnable demandLost = YugiMedia::onDemandLost;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final Listener listener;
@@ -83,6 +86,8 @@ public final class YugiEvents {
 
     public synchronized void stop() {
         running = false;
+        ui.removeCallbacks(demandLost);
+        ui.post(demandLost); // no events in the background: the phone mic and camera turn off now
         Call c = call;
         if (c != null) c.cancel();
         if (thread != null) thread.interrupt();
@@ -152,6 +157,8 @@ public final class YugiEvents {
                 if (running) LimeLog.info("YugiEvents: " + e.getMessage());
             } finally {
                 call = null;
+                // the link to the server is gone: the mic and camera turn off unless it is back in time
+                if (running) ui.postDelayed(demandLost, DEMAND_GRACE_MS);
             }
             if (!running) break;
             if (gotData) backoff = 1000;
@@ -167,6 +174,23 @@ public final class YugiEvents {
     private void dispatch(String event, String data, boolean replay) {
         if ("media.rect".equals(event)) { // the redirected video moved on the desktop
             if (!replay) YugiPlayer.onRectEvent(data);
+            return;
+        }
+        if ("media.cam".equals(event) || "media.mic".equals(event)) {
+            // State, not a one-off: the replayed value on (re)connect counts too
+            boolean cam = "media.cam".equals(event);
+            boolean on;
+            try {
+                on = new JSONObject(data).optBoolean("on");
+            } catch (Exception e) {
+                LimeLog.warning("YugiEvents: bad " + event + " " + e);
+                return;
+            }
+            ui.post(() -> {
+                if (!running) return;
+                ui.removeCallbacks(demandLost);
+                YugiMedia.onDemand(cam, on);
+            });
             return;
         }
         if ("media".equals(event)) {

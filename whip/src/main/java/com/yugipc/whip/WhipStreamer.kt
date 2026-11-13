@@ -78,8 +78,12 @@ class WhipStreamer @JvmOverloads constructor(
     private var capturer: CameraVideoCapturer? = null
     private var textureHelper: SurfaceTextureHelper? = null
     private var capturing = false
-    private var micEnabled = config.micInitiallyEnabled
-    private var cameraEnabled = config.cameraInitiallyEnabled
+    /**
+     * Wanted state, set at once by the setters (any thread) so a start() that follows them opens the
+     * session with exactly these: the mic never records and the camera never opens "for a moment".
+     */
+    @Volatile private var micEnabled = config.micInitiallyEnabled
+    @Volatile private var cameraEnabled = config.cameraInitiallyEnabled
 
     private var pc: PeerConnection? = null
     private var resourceUrl: String? = null
@@ -125,20 +129,19 @@ class WhipStreamer @JvmOverloads constructor(
         }
     }
 
-    /** Mute/unmute the microphone (track keeps running, sends silence). */
+    /**
+     * Turn the microphone on/off. Off really stops recording (AudioRecord is stopped and released,
+     * the system mic indicator goes away), not just a muted track.
+     */
     fun setMicEnabled(enabled: Boolean) {
-        worker.execute {
-            micEnabled = enabled
-            audioTrack?.setEnabled(enabled)
-        }
+        micEnabled = enabled
+        worker.execute { applyMic() }
     }
 
     /** Turn the camera on/off (the camera device is really closed when off). */
     fun setCameraEnabled(enabled: Boolean) {
-        worker.execute {
-            cameraEnabled = enabled
-            applyCamera()
-        }
+        cameraEnabled = enabled
+        worker.execute { applyCamera() }
     }
 
     /** Toggle front/back camera. */
@@ -182,8 +185,6 @@ class WhipStreamer @JvmOverloads constructor(
         val h = if (host.contains(':') && !host.startsWith("[")) "[$host]" else host
         endpoint = "http://$h:$port${config.path}"
         http = WhipHttp(config.bearerToken)
-        micEnabled = config.micInitiallyEnabled
-        cameraEnabled = config.cameraInitiallyEnabled
         reconnectDelayMs = config.reconnectInitialDelayMs
 
         try {
@@ -250,6 +251,15 @@ class WhipStreamer @JvmOverloads constructor(
         applyCamera()
     }
 
+    /** Worker thread. Recording follows micEnabled on the current peer connection. */
+    private fun applyMic() {
+        val on = micEnabled
+        audioTrack?.setEnabled(on)
+        // Stops (or allows) the audio device's recording for every sending stream; while off,
+        // a stream that starts sending does not start the AudioRecord either.
+        pc?.let { runCatching { it.setAudioRecording(on) } }
+    }
+
     private fun applyCamera() {
         val cap = capturer ?: return
         if (cameraEnabled && !capturing) {
@@ -283,6 +293,7 @@ class WhipStreamer @JvmOverloads constructor(
             val peer = f.createPeerConnection(rtc, PcObserver(gen, gatheringDone))
                 ?: throw IOException("createPeerConnection returned null")
             pc = peer
+            applyMic() // before any stream sends: the mic records only when wanted
 
             audioTrack?.let {
                 peer.addTransceiver(
@@ -359,6 +370,8 @@ class WhipStreamer @JvmOverloads constructor(
                 disconnectTask?.cancel(false); disconnectTask = null
                 pendingTask?.cancel(false); pendingTask = null
                 reconnectDelayMs = config.reconnectInitialDelayMs
+                applyMic()
+                applyCamera()
                 setState(WhipState.CONNECTED, null, false)
             }
             PeerConnection.PeerConnectionState.DISCONNECTED -> {
