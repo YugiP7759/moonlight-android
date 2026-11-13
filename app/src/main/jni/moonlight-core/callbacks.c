@@ -592,7 +592,9 @@ static AUDIO_RENDERER_CALLBACKS BridgeAudioRendererCallbacks = {
         .stop = BridgeArStop,
         .cleanup = BridgeArCleanup,
         .decodeAndPlaySample = BridgeArDecodeAndPlaySample,
-        .capabilities = CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION
+        // YugiPC battery: CAPABILITY_SLOW_OPUS_DECODER makes the host send 10 ms audio packets instead of 5 ms,
+        // half the audio packets (and decode calls) for +5 ms audio latency. Stereo only, so no quality change.
+        .capabilities = CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION | CAPABILITY_SLOW_OPUS_DECODER
 };
 
 static CONNECTION_LISTENER_CALLBACKS BridgeConnListenerCallbacks = {
