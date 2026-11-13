@@ -424,6 +424,7 @@ public final class YugiPlayer {
                 // fold / rotate: the player stays, only its geometry follows the new window
                 layoutTexture();
                 retarget(false);
+                if (req != null && !hasSrc && !full && !closing) setFull(true); // no place in the page for it
             }
         });
     }
@@ -502,8 +503,9 @@ public final class YugiPlayer {
             Bitmap crop = cropHero(bmp, opening);
             if (crop != null) hero.setImageBitmap(crop);
             retarget(false);
-            // no place in the page (the desktop sent no rect): full screen, as a flight from the middle
-            if (!hasSrc) setFull(true);
+            // no place in the page: full screen, as a flight from the middle (before the first layout, the
+            // layout listener decides)
+            if (!hasSrc && (deskVideo == null || layer.getWidth() > 0)) setFull(true);
             applyGeometry();
         });
         applyGeometry();
