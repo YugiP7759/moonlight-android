@@ -77,7 +77,8 @@ public final class YugiTransition {
         if (b == null) return null;
         ImageView iv = new ImageView(a);
         iv.setImageBitmap(b);
-        iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        // Letterbox: keep the frozen frame's true aspect ratio (never stretch it to the new screen)
+        iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
         iv.setBackgroundColor(0xFF000000);
         a.addContentView(iv, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));

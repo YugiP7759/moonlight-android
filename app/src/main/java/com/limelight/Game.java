@@ -502,6 +502,18 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             }
             com.limelight.yugi.YugiOverlay.attachKeyboardButton(this, this::toggleKeyboard);
             com.limelight.yugi.YugiFps.reset(() -> runOnUiThread(this::yugiRestart));
+
+            // Fold/unfold or rotation: the window changes size (sometimes without a usable
+            // onConfigurationChanged). Watch the real view size and re-stream on any aspect change.
+            // If the system re-created this activity on a new screen with the old stream size, re-stream now.
+            getWindow().getDecorView().post(() -> {
+                if (!yugiRestarting && yugiSizeChanged()) yugiRestart();
+            });
+            getWindow().getDecorView().addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+                if ((r - l) != (or - ol) || (b - t) != (ob - ot)) {
+                    if (yugiSizeChanged()) yugiRestart();
+                }
+            });
         }
 
         rootView = streamContainer.getParent();
@@ -3503,7 +3515,12 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     /** YugiPC: true if the window's aspect ratio no longer matches the stream (rotation / fold / unfold). */
     private boolean yugiSizeChanged() {
         int w, h;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        // Window bounds (not affected by the soft keyboard); decor view size as a fallback
+        View decor = getWindow().getDecorView();
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R && decor.getWidth() > 0 && decor.getHeight() > 0) {
+            w = decor.getWidth();
+            h = decor.getHeight();
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             android.graphics.Rect b = getWindowManager().getCurrentWindowMetrics().getBounds();
             w = b.width();
             h = b.height();
@@ -3526,6 +3543,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         displayedFailureDialog = true; // suppress any termination dialog
         int newRotation = getWindowManager().getDefaultDisplay().getRotation();
         com.limelight.yugi.YugiTransition.rotationDelta = ((newRotation - yugiRotation + 4) % 4);
+        // Never show the old stream stretched to the new shape: letterbox it right away.
+        streamContainer.setDesiredAspectRatio((double) prefConfig.width / (double) prefConfig.height);
+        streamContainer.setFillDisplay(false);
         com.limelight.yugi.YugiTransition.capture(this, streamContainer.getSurfaceView(), () -> {
             com.limelight.yugi.YugiTransition.pendingResize = true;
             stopConnection();
