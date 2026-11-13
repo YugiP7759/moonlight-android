@@ -116,7 +116,7 @@ public class YugiUiScreenshotTest {
                 new YugiNav.Item("משחקים", true, null),
                 YugiNav.Item.section("תצוגה"),
                 new YugiNav.Item("תמונה: מלא (חיתוך)", false, null),
-                new YugiNav.Item("רזולוציה: 16:9 (1920×1080)", false, null),
+                new YugiNav.Item("רזולוציה: 16:9 (\u20661920×1080\u2069)", false, null),
                 new YugiNav.Item("סטטיסטיקות: מוצגות", false, null),
                 YugiNav.Item.section("שלט"),
                 new YugiNav.Item("הגדרות שלט", false, null),
@@ -160,6 +160,7 @@ public class YugiUiScreenshotTest {
             @Override public void captureScreen(YugiChat.BitmapCallback cb) { cb.onBitmap(null); }
             @Override public void pickFile() {}
             @Override public int reservedTop() { return pcChrome.getReservedTop(); }
+            @Override public void onKeyboard(boolean shown) { pcChrome.setChromeVisible(!shown); }
         });
         chat.rerenderForTest();
         chat.addPendingForTest("screenshot-1412.jpg", "image/jpeg", new byte[0], thumb(a));
@@ -203,7 +204,7 @@ public class YugiUiScreenshotTest {
     private static void checkNoOverlap(String an, List<Rect> a, String bn, List<Rect> b, List<String> problems) {
         for (int i = 0; i < a.size(); i++) {
             for (int j = 0; j < b.size(); j++) {
-                if (a == b && j <= i) continue;
+                if (an.equals(bn) && j <= i) continue;
                 if (Rect.intersects(a.get(i), b.get(j))) {
                     problems.add(an + "#" + i + " " + a.get(i).toShortString() + " overlaps " + bn + "#" + j + " " + b.get(j).toShortString());
                 }

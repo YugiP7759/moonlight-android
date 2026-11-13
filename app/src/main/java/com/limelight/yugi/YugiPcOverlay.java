@@ -53,6 +53,7 @@ public final class YugiPcOverlay {
             @Override public void captureScreen(YugiChat.BitmapCallback cb) { capture(surface, cb); }
             @Override public void pickFile() { YugiChat.openPicker(a); }
             @Override public int reservedTop() { return o.chrome.getReservedTop(); }
+            @Override public void onKeyboard(boolean shown) { o.chrome.setChromeVisible(!shown); }
         });
         return o;
     }

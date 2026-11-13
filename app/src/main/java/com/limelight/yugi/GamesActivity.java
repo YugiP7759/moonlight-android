@@ -310,6 +310,7 @@ public class GamesActivity extends Activity {
             @Override public void captureScreen(YugiChat.BitmapCallback cb) { snapshot(cb); }
             @Override public void pickFile() { YugiChat.openPicker(GamesActivity.this); }
             @Override public int reservedTop() { return chrome.getReservedTop(); }
+            @Override public void onKeyboard(boolean shown) { chrome.setChromeVisible(!shown); }
         });
     }
 
@@ -325,7 +326,7 @@ public class GamesActivity extends Activity {
         items.add(new YugiNav.Item("משחקים", true, null));
         items.add(YugiNav.Item.section("תצוגה"));
         items.add(new YugiNav.Item("תמונה: " + FIT_NAMES[fi], false, this::cycleFit));
-        items.add(new YugiNav.Item(force169 ? "רזולוציה: 16:9 (1920×1080)" : "רזולוציה: לפי המסך", false, this::toggle169));
+        items.add(new YugiNav.Item(force169 ? "רזולוציה: 16:9 (\u20661920×1080\u2069)" : "רזולוציה: לפי המסך", false, this::toggle169));
         items.add(new YugiNav.Item(statsOn ? "סטטיסטיקות: מוצגות" : "סטטיסטיקות: מוסתרות", false, this::toggleStats));
         items.add(YugiNav.Item.section("שלט"));
         items.add(new YugiNav.Item("הגדרות שלט", false, this::openPadSettings));

@@ -68,6 +68,7 @@ public final class YugiNav {
         int m = YugiTheme.dp(a, 12);
         FrameLayout scrim = new FrameLayout(a);
         scrim.setBackgroundColor(0x4D000000);
+        scrim.setLayoutDirection(View.LAYOUT_DIRECTION_LTR); // panel on the right; its content is RTL
         scrim.setClickable(true);
 
         LinearLayout panel = new LinearLayout(a);

@@ -81,6 +81,8 @@ public class YugiChrome extends FrameLayout {
     public YugiChrome(Context ctx, List<Button> items) {
         super(ctx);
         setClipChildren(false);
+        // Fixed placement in every locale: toolbar top-right, stats top-left
+        setLayoutDirection(LAYOUT_DIRECTION_LTR);
         // The chrome itself never takes touches; only its children do.
         setClickable(false);
         setFocusable(false);

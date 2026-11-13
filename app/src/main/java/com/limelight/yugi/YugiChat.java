@@ -88,6 +88,8 @@ public class YugiChat extends FrameLayout {
         void pickFile();
         /** Top edge (px) the panel must stay below (the toolbar). */
         int reservedTop();
+        /** The keyboard opened or closed while the panel is open (hide the toolbar to make room). */
+        default void onKeyboard(boolean shown) {}
     }
 
     public interface BitmapCallback { void onBitmap(Bitmap b); }
@@ -134,7 +136,7 @@ public class YugiChat extends FrameLayout {
     // ---- view ----
     private final Host host;
     private final Handler ui = new Handler(Looper.getMainLooper());
-    private final LinearLayout card;
+    private final ChatCard card;
     private final LinearLayout list;
     private final ScrollView scroll;
     private final EditText input;
@@ -170,9 +172,9 @@ public class YugiChat extends FrameLayout {
         setClickable(false);
         setFocusable(false);
         setVisibility(GONE);
+        setLayoutDirection(LAYOUT_DIRECTION_LTR); // card on the right in every locale; its content is RTL
 
-        card = new LinearLayout(ctx);
-        card.setOrientation(LinearLayout.VERTICAL);
+        card = new ChatCard(ctx);
         card.setLayoutDirection(LAYOUT_DIRECTION_RTL);
         card.setBackground(YugiTheme.roundedStroke(ctx, YugiTheme.GLASS_STRONG, YugiTheme.RADIUS_L, YugiTheme.STROKE));
         card.setElevation(dp(12));
@@ -212,13 +214,15 @@ public class YugiChat extends FrameLayout {
         ImageButton close = YugiTheme.iconButton(ctx, R.drawable.yugi_ic_close, "סגור");
         close.setOnClickListener(v -> setOpen(false));
         head.addView(close, sq(48));
+        card.header = head;
         card.addView(head);
 
         View hair = new View(ctx);
         hair.setBackgroundColor(YugiTheme.STROKE);
         LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, dp(1)));
         hlp.topMargin = dp(6);
-        card.addView(hair, hlp);
+        card.hair = hair;
+        card.addView(hair);
 
         // ---- messages ----
         scroll = new ScrollView(ctx);
@@ -228,7 +232,8 @@ public class YugiChat extends FrameLayout {
         list.setOrientation(LinearLayout.VERTICAL);
         list.setPadding(dp(4), dp(8), dp(4), dp(8));
         scroll.addView(list);
-        card.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        card.scroll = scroll;
+        card.addView(scroll);
 
         // ---- attachment preview ----
         attachRow = new LinearLayout(ctx);
@@ -238,7 +243,8 @@ public class YugiChat extends FrameLayout {
         attachScroll.setHorizontalScrollBarEnabled(false);
         attachScroll.addView(attachRow);
         attachScroll.setVisibility(GONE);
-        card.addView(attachScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        card.attach = attachScroll;
+        card.addView(attachScroll);
 
         // ---- input ----
         inputBox = new LinearLayout(ctx);
@@ -284,7 +290,8 @@ public class YugiChat extends FrameLayout {
         inputBox.addView(micSend, sq(48));
         LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         ilp.topMargin = dp(4);
-        card.addView(inputBox, ilp);
+        card.input = inputBox;
+        card.addView(inputBox);
         updateSendButton();
 
         // Keep the card above the keyboard and system bars
@@ -301,6 +308,63 @@ public class YugiChat extends FrameLayout {
         });
 
         renderAll();
+    }
+
+    /**
+     * Card layout with fixed priorities: the input row is always laid out first at the bottom, then the
+     * attachment preview above it, the header at the top, and the messages get whatever is left.
+     * With little room (keyboard open on the cover screen) the header is dropped.
+     */
+    static final class ChatCard extends ViewGroup {
+        View header, hair, scroll, attach, input;
+
+        ChatCard(Context c) { super(c); }
+
+        private int dp(float v) { return YugiTheme.dp(getContext(), v); }
+
+        @Override
+        protected void onMeasure(int wSpec, int hSpec) {
+            int w = MeasureSpec.getSize(wSpec), h = MeasureSpec.getSize(hSpec);
+            setMeasuredDimension(w, h);
+            int innerW = w - getPaddingLeft() - getPaddingRight();
+            int avail = h - getPaddingTop() - getPaddingBottom();
+            int exactW = MeasureSpec.makeMeasureSpec(innerW, MeasureSpec.EXACTLY);
+            int atMost = MeasureSpec.makeMeasureSpec(Math.max(0, avail), MeasureSpec.AT_MOST);
+            input.measure(exactW, atMost);
+            avail -= input.getMeasuredHeight() + dp(4);
+            if (attach.getVisibility() != GONE) {
+                attach.measure(exactW, MeasureSpec.makeMeasureSpec(Math.max(0, avail), MeasureSpec.AT_MOST));
+                avail -= attach.getMeasuredHeight();
+            }
+            boolean showHeader = avail >= dp(48 + 7 + 72); // keep at least a few lines of messages
+            header.setVisibility(showHeader ? VISIBLE : GONE);
+            hair.setVisibility(showHeader ? VISIBLE : GONE);
+            if (showHeader) {
+                header.measure(exactW, MeasureSpec.makeMeasureSpec(dp(48), MeasureSpec.EXACTLY));
+                hair.measure(exactW, MeasureSpec.makeMeasureSpec(Math.max(1, dp(1)), MeasureSpec.EXACTLY));
+                avail -= header.getMeasuredHeight() + hair.getMeasuredHeight() + dp(6);
+            }
+            scroll.measure(exactW, MeasureSpec.makeMeasureSpec(Math.max(0, avail), MeasureSpec.EXACTLY));
+        }
+
+        @Override
+        protected void onLayout(boolean changed, int l, int t, int r, int b) {
+            int left = getPaddingLeft(), right = (r - l) - getPaddingRight();
+            int y = getPaddingTop();
+            if (header.getVisibility() != GONE) {
+                header.layout(left, y, right, y + header.getMeasuredHeight());
+                y += header.getMeasuredHeight() + dp(6);
+                hair.layout(left, y, right, y + hair.getMeasuredHeight());
+                y += hair.getMeasuredHeight();
+            }
+            scroll.layout(left, y, right, y + scroll.getMeasuredHeight());
+            int bottom = (b - t) - getPaddingBottom();
+            input.layout(left, bottom - input.getMeasuredHeight(), right, bottom);
+            bottom -= input.getMeasuredHeight() + dp(4);
+            if (attach.getVisibility() != GONE) {
+                attach.layout(left, bottom - attach.getMeasuredHeight(), right, bottom);
+            }
+        }
     }
 
     private LinearLayout.LayoutParams sq(int sizeDp) {
@@ -331,7 +395,9 @@ public class YugiChat extends FrameLayout {
     /** Keyboard (IME) and navigation-bar insets in px. */
     public void setInsets(int ime, int nav) {
         if (ime != imeInset || nav != navInset) {
+            boolean wasShown = imeInset > 0;
             imeInset = ime;
+            if (host != null && (ime > 0) != wasShown) host.onKeyboard(ime > 0 && open);
             navInset = nav;
             requestLayout();
             if (open) scrollToEnd();
@@ -356,13 +422,12 @@ public class YugiChat extends FrameLayout {
     /** Where the card goes: end side, below the toolbar, above the keyboard. */
     Rect cardRect(int w, int h) {
         int m = dp(12);
-        int top = Math.max(m, host != null ? host.reservedTop() : m);
+        // With the keyboard up the toolbar hides, so the card can use the whole height above it
+        int top = imeInset > 0 ? m : Math.max(m, host != null ? host.reservedTop() : m);
         int bottom = h - Math.max(m, Math.max(imeInset, navInset) + m);
         int width = w >= dp(600) ? Math.min(dp(420), (int) (w * 0.46f)) : w - 2 * m;
         boolean rtl = getLayoutDirection() == LAYOUT_DIRECTION_RTL;
         int left = rtl ? m : w - m - width;
-        // Very little room above the keyboard: use it all, the input row stays visible
-        if (bottom - top < dp(160)) top = Math.max(m, bottom - dp(160));
         return new Rect(left, top, left + width, bottom);
     }
 
@@ -394,6 +459,7 @@ public class YugiChat extends FrameLayout {
             requestApplyInsets();
         } else {
             hideKeyboard();
+            if (host != null) host.onKeyboard(false);
             stopListening();
             if (tts != null) tts.stop();
             card.animate().alpha(0f).setDuration(120).withEndAction(() -> setVisibility(GONE)).start();
@@ -504,7 +570,7 @@ public class YugiChat extends FrameLayout {
         }
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.bottomMargin = dp(6);
-        lp.leftMargin = dp(6);
+        lp.setMarginEnd(dp(8));
         f.setLayoutParams(lp);
         return f;
     }
