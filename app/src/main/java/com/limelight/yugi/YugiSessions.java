@@ -93,6 +93,7 @@ public class YugiSessions extends FrameLayout {
     private final EditText input;
     private final ImageButton send;
     private final TextView readOnlyNote;
+    private final View detailHead, detailHair;
     private final SpringAnimation listX, detailX;
 
     private boolean shown;
@@ -180,6 +181,8 @@ public class YugiSessions extends FrameLayout {
         View hair = new View(ctx);
         hair.setBackgroundColor(YugiTheme.STROKE);
         dcol.addView(hair, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, dp(1))));
+        detailHead = dhead;
+        detailHair = hair;
 
         msgScroll = new ScrollView(ctx);
         msgScroll.setVerticalScrollBarEnabled(false);
@@ -258,6 +261,15 @@ public class YugiSessions extends FrameLayout {
         });
 
         renderEmpty("טוען…");
+    }
+
+    @Override
+    protected void onMeasure(int wSpec, int hSpec) {
+        // Little room (keyboard up on the cover screen): drop the detail header so messages stay visible
+        boolean roomy = MeasureSpec.getSize(hSpec) >= dp(52 + 1 + 60 + 110);
+        int v = roomy ? VISIBLE : GONE;
+        if (detailHead.getVisibility() != v) { detailHead.setVisibility(v); detailHair.setVisibility(v); }
+        super.onMeasure(wSpec, hSpec);
     }
 
     // ---------------------------------------------------------------- building blocks
@@ -780,21 +792,30 @@ public class YugiSessions extends FrameLayout {
         for (int i = 0; i < cards.getChildCount(); i++) {
             View v = cards.getChildAt(i);
             if (!"card".equals(v.getTag())) continue;
-            int[] p = new int[2], me = new int[2];
-            v.getLocationInWindow(p);
-            getLocationInWindow(me);
-            out.add(new Rect(p[0] - me[0], p[1] - me[1], p[0] - me[0] + v.getWidth(), p[1] - me[1] + v.getHeight()));
+            out.add(rectIn(v));
         }
         return out;
     }
 
     /** Input row (or the read-only note) in this view's coordinates. */
     Rect bottomRect() {
-        View v = inputBox.getVisibility() == VISIBLE ? inputBox : readOnlyNote;
-        int[] p = new int[2], me = new int[2];
-        v.getLocationInWindow(p);
-        getLocationInWindow(me);
-        return new Rect(p[0] - me[0], p[1] - me[1], p[0] - me[0] + v.getWidth(), p[1] - me[1] + v.getHeight());
+        return rectIn(inputBox.getVisibility() == VISIBLE ? inputBox : readOnlyNote);
+    }
+
+    /** A descendant's bounds in this view's coordinates (scroll and translation included). */
+    private Rect rectIn(View v) {
+        float x = 0, y = 0;
+        View cur = v;
+        while (cur != null && cur != this) {
+            x += cur.getLeft() + cur.getTranslationX();
+            y += cur.getTop() + cur.getTranslationY();
+            if (cur.getParent() instanceof View) {
+                View par = (View) cur.getParent();
+                if (par != this) { x -= par.getScrollX(); y -= par.getScrollY(); }
+                cur = par;
+            } else cur = null;
+        }
+        return new Rect(Math.round(x), Math.round(y), Math.round(x) + v.getWidth(), Math.round(y) + v.getHeight());
     }
 
     int visibleMessageCount() {
