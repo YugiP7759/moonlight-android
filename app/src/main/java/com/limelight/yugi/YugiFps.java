@@ -31,7 +31,7 @@ public final class YugiFps {
     /** Called from the decoder's stats window (once per window). */
     public static void report(float receivedFps, float requestedFps) {
         Listener l = listener;
-        if (l == null || fallback || requestedFps <= YugiConfig.FPS_FALLBACK) return;
+        if (!YugiConfig.FPS_AUTO_FALLBACK || l == null || fallback || requestedFps <= YugiConfig.FPS_FALLBACK) return;
         if (++windows <= WARMUP_WINDOWS) return;
         bad = receivedFps < HOLD_THRESHOLD ? bad + 1 : 0;
         if (bad >= BAD_WINDOWS) {

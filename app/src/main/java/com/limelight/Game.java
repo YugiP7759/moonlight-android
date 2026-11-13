@@ -487,7 +487,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         if (yugi) {
             yugiRotation = getWindowManager().getDefaultDisplay().getRotation();
             yugiFrozen = com.limelight.yugi.YugiTransition.addFrozenFrame(this, true);
-            com.limelight.yugi.YugiOverlay.attach(this);
+            if (com.limelight.yugi.YugiMedia.isAvailable()) {
+                com.limelight.yugi.YugiOverlay.attach(this);
+            }
             com.limelight.yugi.YugiFps.reset(() -> runOnUiThread(this::yugiRestart));
         }
 
@@ -3602,6 +3604,15 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 if (spinner != null) {
                     spinner.dismiss();
                     spinner = null;
+                }
+
+                if (!displayedFailureDialog && yugi) {
+                    // YugiPC: no Moonlight dialog; the launcher retries
+                    displayedFailureDialog = true;
+                    LimeLog.severe("YugiPC: " + stage + " failed: " + errorCode);
+                    stopConnection();
+                    finish();
+                    return;
                 }
 
                 if (!displayedFailureDialog) {

@@ -14,16 +14,35 @@ public final class YugiConfig {
     /** Sunshine app to stream. */
     public static final String APP_NAME = "Desktop";
 
-    /** Requested frame rate, and the stable minimum to fall back to. */
+    /** Requested frame rate, and the stable minimum. */
     public static final int FPS_PREFERRED = 120;
     public static final int FPS_FALLBACK = 60;
 
     /**
-     * Stream resolution as a fraction of the active screen (same aspect ratio).
-     * 1.0 = native. Lower it if the server can only hold 60 FPS at a reduced size;
-     * the picture is then stretched to the full screen with bilinear filtering (no bars).
+     * Per-screen stream profiles, measured on the server (x264 on CPU).
+     * The stream keeps the active screen's aspect ratio at a fraction of its size and is
+     * stretched back to full screen with bilinear filtering (no bars).
+     *  - Cover screen (wide, e.g. 2520x1080): 66% -> ~1664x712 holds 120 FPS (~111 real).
+     *  - Main / inner screen (near-square, e.g. 2184x1968): 55% -> ~1200x1080 at 60 FPS.
+     * A screen whose long/short side ratio is at least WIDE_ASPECT uses the cover profile.
      */
+    public static final float WIDE_ASPECT = 1.6f;
+    public static final float COVER_SCALE = 0.66f;
+    public static final int COVER_FPS = 120;
+    public static final float INNER_SCALE = 0.55f;
+    public static final int INNER_FPS = 60;
+
+    /**
+     * Automatic 120 -> 60 drop when the received rate stays low. Off by default: the profiles above
+     * are already tuned, and an idle desktop may legitimately send fewer frames.
+     */
+    public static final boolean FPS_AUTO_FALLBACK = false;
+
+    /** Extra global multiplier on top of the per-screen scale (1.0 = as measured). */
     public static final float RES_SCALE = 1.0f;
+
+    /** Stream dimensions are rounded to this multiple (encoder friendly). */
+    public static final int SIZE_ALIGN = 8;
 
     /** Client name shown in Sunshine's paired-devices list. */
     public static final String CLIENT_NAME = "YugiPC";
@@ -43,8 +62,13 @@ public final class YugiConfig {
     /** Current host (may be switched to the embedded tunnel's local forwarder). */
     public static volatile String host = DEFAULT_HOST;
 
-    /** Round a dimension down to an even number (encoders need even sizes). */
-    public static int even(int v) {
-        return Math.max(2, v & ~1);
+    /** Round a dimension to the nearest multiple of SIZE_ALIGN. */
+    public static int align(float v) {
+        int a = Math.round(v / SIZE_ALIGN) * SIZE_ALIGN;
+        return Math.max(SIZE_ALIGN, a);
+    }
+
+    public static boolean isWide(int w, int h) {
+        return (float) Math.max(w, h) / Math.max(1, Math.min(w, h)) >= WIDE_ASPECT;
     }
 }

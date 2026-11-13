@@ -63,6 +63,8 @@ public class YugiLauncher extends Activity {
     private android.widget.ImageView frozen;
     private boolean resizeLaunch;
     private boolean askingPermissions;
+    private long gameStartedAt;
+    private int quickFailures;
     private static final String KEY_PERMS_ASKED = "perms_asked";
     private static final int REQ_PERMS = 7001;
 
@@ -96,8 +98,16 @@ public class YugiLauncher extends Activity {
         if (launchedGame) {
             // Back from the stream (closed or dropped): reconnect shortly, never show a PC list.
             launchedGame = false;
+            long ranFor = System.currentTimeMillis() - gameStartedAt;
+            quickFailures = ranFor < 15000 ? quickFailures + 1 : 0;
+            if (quickFailures >= 3) {
+                // Keeps failing right away: stop looping and let the user retry.
+                quickFailures = 0;
+                showError("החיבור נופל שוב ושוב. נסה שוב בעוד רגע");
+                return;
+            }
             showStatus("מתחבר מחדש…", true);
-            exit.setVisibility(View.VISIBLE);
+            ui.post(() -> exit.setVisibility(View.VISIBLE));
             scheduleRetry(1500);
         } else if (!working) {
             connect();
@@ -308,6 +318,7 @@ public class YugiLauncher extends Activity {
             ui.post(() -> {
                 working = false;
                 launchedGame = true;
+                gameStartedAt = System.currentTimeMillis();
                 boolean seamless = resizeLaunch;
                 resizeLaunch = false;
                 if (seamless) intent.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION);
@@ -387,11 +398,14 @@ public class YugiLauncher extends Activity {
             w = p.x;
             h = p.y;
         }
+        boolean wide = YugiConfig.isWide(w, h);
+        float scale = (wide ? YugiConfig.COVER_SCALE : YugiConfig.INNER_SCALE) * YugiConfig.RES_SCALE;
+        int fps = wide ? YugiConfig.COVER_FPS : YugiConfig.INNER_FPS;
+        if (YugiFps.fallback || maxRefreshRate() < fps - 1) fps = YugiConfig.FPS_FALLBACK;
         StreamSize s = new StreamSize();
-        s.width = YugiConfig.even(Math.round(w * YugiConfig.RES_SCALE));
-        s.height = YugiConfig.even(Math.round(h * YugiConfig.RES_SCALE));
-        s.fps = (!YugiFps.fallback && maxRefreshRate() >= YugiConfig.FPS_PREFERRED - 1)
-                ? YugiConfig.FPS_PREFERRED : YugiConfig.FPS_FALLBACK;
+        s.width = YugiConfig.align(w * scale);
+        s.height = YugiConfig.align(h * scale);
+        s.fps = fps;
         return s;
     }
 
