@@ -228,6 +228,7 @@ public class YugiSessions extends FrameLayout {
         input.setMaxLines(5);
         input.setImeOptions(EditorInfo.IME_ACTION_SEND | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
         input.setTextDirection(TEXT_DIRECTION_FIRST_STRONG);
+        input.setShowSoftInputOnFocus(false); // the YugiPC keyboard types here, never the phone's
         input.setOnEditorActionListener((v, id, ev) -> {
             if (id == EditorInfo.IME_ACTION_SEND || (ev != null && ev.getKeyCode() == KeyEvent.KEYCODE_ENTER
                     && ev.getAction() == KeyEvent.ACTION_DOWN)) {
@@ -733,6 +734,9 @@ public class YugiSessions extends FrameLayout {
         send.setBackground(g);
         send.setImageTintList(android.content.res.ColorStateList.valueOf(can ? 0xFF0B0E14 : YugiTheme.TEXT_FAINT));
     }
+
+    /** The in-app YugiPC keyboard types into this panel's field (Enter sends). */
+    void bindKeyboard(YugiFieldKeyboard k) { k.bind(input, this::sendTyped); }
 
     private void sendTyped() {
         String text = input.getText().toString().trim();

@@ -435,6 +435,7 @@ public class YugiChat extends FrameLayout {
     void attachKeyboard(Activity a) {
         fieldKb = YugiFieldKeyboard.attach(a);
         fieldKb.bind(input, this::sendTyped);
+        sessions.bindKeyboard(fieldKb);
         fieldKb.setInsetListener(new YugiFieldKeyboard.InsetListener() {
             @Override public void onKeyboardInset(int px) {
                 if (px == kbInset) return;
