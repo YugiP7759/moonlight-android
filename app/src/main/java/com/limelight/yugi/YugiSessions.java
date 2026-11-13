@@ -147,7 +147,6 @@ public class YugiSessions extends FrameLayout {
 
         // ---------------- detail page
         detailPage = new FrameLayout(ctx);
-        detailPage.setBackground(YugiTheme.rounded(ctx, YugiTheme.BRAND_BG, YugiTheme.RADIUS_L - 6));
         detailPage.setClickable(true);
         LinearLayout dcol = column(ctx);
         LinearLayout dhead = header(ctx);
@@ -158,9 +157,10 @@ public class YugiSessions extends FrameLayout {
         dtitles.setOrientation(LinearLayout.VERTICAL);
         dtitles.setPadding(dp(4), 0, dp(8), 0);
         detailTitle = YugiTheme.text(ctx, "", 17, 600, YugiTheme.TEXT);
-        detailTitle.setSingleLine(true);
+        detailTitle.setMaxLines(1);
         detailTitle.setEllipsize(TextUtils.TruncateAt.END);
-        dtitles.addView(detailTitle);
+        detailTitle.setTextAlignment(TEXT_ALIGNMENT_VIEW_START);
+        dtitles.addView(detailTitle, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         LinearLayout subRow = new LinearLayout(ctx);
         subRow.setOrientation(LinearLayout.HORIZONTAL);
         subRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -168,10 +168,11 @@ public class YugiSessions extends FrameLayout {
         detailDot = dot(ctx, YugiTheme.TEXT_FAINT);
         subRow.addView(detailDot, new LinearLayout.LayoutParams(dp(7), dp(7)));
         detailSubtitle = YugiTheme.text(ctx, "", 12, 400, YugiTheme.TEXT_DIM);
-        detailSubtitle.setSingleLine(true);
+        detailSubtitle.setMaxLines(1);
         detailSubtitle.setEllipsize(TextUtils.TruncateAt.END);
+        detailSubtitle.setTextAlignment(TEXT_ALIGNMENT_VIEW_START);
         detailSubtitle.setPadding(dp(6), 0, 0, 0);
-        subRow.addView(detailSubtitle);
+        subRow.addView(detailSubtitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         dtitles.addView(subRow);
         dhead.addView(dtitles, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         ImageButton dclose = YugiTheme.iconButton(ctx, R.drawable.yugi_ic_close, "סגור");
@@ -257,7 +258,9 @@ public class YugiSessions extends FrameLayout {
         listX = spring(listPage);
         detailX = spring(detailPage);
         detailX.addEndListener((a, canceled, v, vel) -> {
-            if (!inDetail && !canceled) detailPage.setVisibility(INVISIBLE);
+            if (canceled) return;
+            if (inDetail) { listPage.setVisibility(INVISIBLE); detailPage.setBackground(null); }
+            else detailPage.setVisibility(INVISIBLE);
         });
 
         renderEmpty("טוען…");
@@ -450,15 +453,16 @@ public class YugiSessions extends FrameLayout {
         View d = dot(c, stateColor(state));
         top.addView(d, new LinearLayout.LayoutParams(dp(9), dp(9)));
         TextView name = YugiTheme.text(c, s.optString("name"), 16, 600, YugiTheme.TEXT);
-        name.setSingleLine(true);
+        name.setMaxLines(1);
         name.setEllipsize(TextUtils.TruncateAt.END);
         name.setPadding(dp(8), 0, dp(8), 0);
         name.setTextDirection(TEXT_DIRECTION_FIRST_STRONG);
+        name.setTextAlignment(TEXT_ALIGNMENT_VIEW_START);
         top.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         String area = s.optString("areaLabel", "");
         String meta = stateLabel(state) + (area.isEmpty() ? "" : " · " + area);
         TextView metaT = YugiTheme.text(c, meta, 12, 500, "working".equals(state) ? GREEN : "needs".equals(state) ? ORANGE : YugiTheme.TEXT_DIM);
-        metaT.setSingleLine(true);
+        metaT.setMaxLines(1);
         top.addView(metaT);
         card.addView(top);
 
@@ -491,7 +495,7 @@ public class YugiSessions extends FrameLayout {
         bottom.setGravity(Gravity.CENTER_VERTICAL);
         bottom.setPadding(0, dp(6), 0, 0);
         TextView ag = YugiTheme.text(c, foot.toString(), 12, 500, YugiTheme.ACCENT);
-        ag.setSingleLine(true);
+        ag.setMaxLines(1);
         ag.setEllipsize(TextUtils.TruncateAt.END);
         bottom.addView(ag, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         TextView wt = YugiTheme.text(c, when, 12, 400, YugiTheme.TEXT_FAINT);
@@ -544,6 +548,8 @@ public class YugiSessions extends FrameLayout {
     private void push(boolean in) {
         int w = getWidth() > 0 ? getWidth() : dp(400);
         float dir = getLayoutDirection() == LAYOUT_DIRECTION_RTL ? -1f : 1f;
+        listPage.setVisibility(VISIBLE);
+        detailPage.setBackground(YugiTheme.rounded(getContext(), YugiTheme.BRAND_BG, YugiTheme.RADIUS_L - 8));
         if (in) {
             detailPage.setVisibility(VISIBLE);
             if (!detailX.isRunning()) detailPage.setTranslationX(dir * w);
@@ -831,6 +837,11 @@ public class YugiSessions extends FrameLayout {
     void settleForTest() {
         if (listX.isRunning()) listX.skipToEnd();
         if (detailX.isRunning()) detailX.skipToEnd();
-        if (inDetail) { detailPage.setTranslationX(0); detailPage.setVisibility(VISIBLE); }
+        if (inDetail) {
+            detailPage.setTranslationX(0);
+            detailPage.setVisibility(VISIBLE);
+            detailPage.setBackground(null);
+            listPage.setVisibility(INVISIBLE);
+        }
     }
 }
