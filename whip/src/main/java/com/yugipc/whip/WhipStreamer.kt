@@ -67,6 +67,7 @@ class WhipStreamer @JvmOverloads constructor(
     private var appContext: Context? = null
     private var endpoint: String = ""
     private var host: String = ""
+    private var httpPort: Int = 0
     private var eglBase: EglBase? = null
     private var factory: PeerConnectionFactory? = null
     private var adm: JavaAudioDeviceModule? = null
@@ -177,6 +178,7 @@ class WhipStreamer @JvmOverloads constructor(
 
         appContext = ctx
         this.host = host
+        this.httpPort = port
         val h = if (host.contains(':') && !host.startsWith("[")) "[$host]" else host
         endpoint = "http://$h:$port${config.path}"
         http = WhipHttp(config.bearerToken)
@@ -319,7 +321,9 @@ class WhipStreamer @JvmOverloads constructor(
             if (config.rewriteRemoteCandidates) {
                 val ip = InetAddress.getByName(host).hostAddress ?: host
                 answerSdp = SdpMunger.rewriteCandidates(
-                    answerSdp, ip, config.iceUdpPort, config.iceTcpPort
+                    answerSdp, ip,
+                    if (config.iceUdpPort < 0) httpPort else config.iceUdpPort,
+                    config.iceTcpPort
                 )
             }
             awaitSetDescription(

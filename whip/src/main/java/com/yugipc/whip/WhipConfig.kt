@@ -26,7 +26,8 @@ class WhipConfig private constructor(b: Builder) {
      * When true (default) every ICE candidate in the server's answer is
      * replaced by candidates that point at the WHIP host itself
      * (the same host passed to start(), e.g. 127.0.0.1 behind a local proxy):
-     * one UDP candidate on [iceUdpPort] and, if [iceTcpPort] > 0, one
+     * one UDP candidate on [iceUdpPort] (-1 = the same port as the WHIP HTTP
+     * port, which is what yugipc-bridge uses) and, if [iceTcpPort] > 0, one
      * passive ICE-TCP candidate on [iceTcpPort].
      * When false the server's candidates are used unchanged.
      */
@@ -56,8 +57,8 @@ class WhipConfig private constructor(b: Builder) {
         internal var videoFps = 30
         internal var videoMaxBitrateBps = 2_500_000
         internal var rewriteRemoteCandidates = true
-        internal var iceUdpPort = 8189
-        internal var iceTcpPort = 8189
+        internal var iceUdpPort = -1
+        internal var iceTcpPort = 0
         internal var iceServers = mutableListOf<String>()
         internal var reconnectInitialDelayMs = 1_000L
         internal var reconnectMaxDelayMs = 30_000L
@@ -88,8 +89,9 @@ class WhipConfig private constructor(b: Builder) {
         fun videoFps(v: Int) = apply { videoFps = v }
         fun videoMaxBitrateBps(v: Int) = apply { videoMaxBitrateBps = v }
         fun rewriteRemoteCandidates(v: Boolean) = apply { rewriteRemoteCandidates = v }
+        /** -1 (default) = same as the HTTP port given to start(). */
         fun iceUdpPort(v: Int) = apply { iceUdpPort = v }
-        /** 0 disables the ICE-TCP candidate. */
+        /** 0 (default) = no ICE-TCP candidate. */
         fun iceTcpPort(v: Int) = apply { iceTcpPort = v }
         fun addIceServer(url: String) = apply { iceServers.add(url) }
         fun reconnectDelays(initialMs: Long, maxMs: Long) = apply {

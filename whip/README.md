@@ -56,8 +56,8 @@ internal thread. Calling `start()` while it is running restarts the session.
 | `videoSize(w,h)`, `videoFps(n)` | 1280x720, 30 | capture format |
 | `videoMaxBitrateBps(n)` | 2,500,000 | encoder cap |
 | `rewriteRemoteCandidates(bool)` | true | replace server ICE candidates (see below) |
-| `iceUdpPort(n)` | 8189 | fixed UDP media port on the server |
-| `iceTcpPort(n)` | 8189 | ICE-TCP port, `0` = no TCP candidate |
+| `iceUdpPort(n)` | -1 | fixed UDP media port on the server. `-1` = same as the HTTP port (8890) |
+| `iceTcpPort(n)` | 0 | ICE-TCP port. `0` = no TCP candidate (yugipc-bridge has no ICE-TCP) |
 | `addIceServer(url)` | none | STUN/TURN, not needed through the proxy |
 | `reconnectDelays(initialMs, maxMs)` | 1000, 30000 | exponential backoff |
 
@@ -67,7 +67,8 @@ internal thread. Calling `start()` while it is running restarts the session.
    then rtx/red/ulpfec. VP9/AV1 are dropped.
 2. Non-trickle WHIP. It waits up to 2 s for ICE gathering, then sends `POST`
    with `Content-Type: application/sdp`. It accepts `200`/`201` with an SDP answer and
-   stores `Location` for the `DELETE` sent on stop and on reconnect.
+   stores `Location` for the `DELETE` sent on stop and on reconnect (the bridge also
+   replaces the old session on a new POST, so a lost DELETE is harmless).
 3. Single address for ICE. With `rewriteRemoteCandidates=true` (default), every
    `a=candidate` in the answer is dropped and replaced by:
    - `udp <host-ip> <iceUdpPort> typ host`
@@ -87,39 +88,42 @@ internal thread. Calling `start()` while it is running restarts the session.
 
 ## What the server needs
 
-The phone reaches the server only through the local Tailscale proxy, at one
-fixed address. On the PC side:
+Verified against the live receiver, `YugiP7759/yugipc-bridge` at
+`100.104.166.48:8890`. On 2026-11-13 a `POST /whip` returned `201`, an SDP
+answer with H264 (pt 96, `nack pli`, `ccm fir`) and VP8, a single host candidate
+`100.104.166.48 8890 udp`, and `Location: /whip/<id>`. The matching `DELETE` returned `200`.
+No server change is needed.
+
+The bridge uses **one port number for everything**:
 
 | port | proto | purpose |
 |---|---|---|
-| **8890** | TCP | WHIP HTTP (`POST /whip`, `DELETE <Location>`) |
-| **8189** | **UDP** | WebRTC media + ICE (single fixed UDP port, ICE UDP mux) |
-| 8189 | TCP | ICE-TCP fallback (optional, recommended) |
+| **8890** | TCP | WHIP HTTP (`POST /whip`, `DELETE /whip/<id>`) |
+| **8890** | **UDP** | WebRTC media + ICE (the one fixed UDP port the proxy must expose) |
 
-The local proxy on the phone must forward:
-- `127.0.0.1:8890/tcp` to `PC:8890/tcp`
-- `127.0.0.1:8189/udp` to `PC:8189/udp`. A 1:1 UDP session per local socket.
-  Replies go back to the same local socket.
-- `127.0.0.1:8189/tcp` to `PC:8189/tcp` (if ICE-TCP is used)
+With the defaults the module replaces the server candidate with
+`<host given to start()> <same port> udp`. So:
+- **Phone on the Tailscale VPN:** `start(ctx, "100.104.166.48", 8890)`. The
+  rewritten candidate is identical to the server's.
+- **Local Tailscale proxy:** `start(ctx, "127.0.0.1", 8890)`. The proxy must
+  forward `127.0.0.1:8890/tcp` to `100.104.166.48:8890/tcp` **and**
+  `127.0.0.1:8890/udp` to `100.104.166.48:8890/udp`. UDP is forwarded as a 1:1 session
+  per local socket, and replies go back to the same socket. The server learns the
+  phone's address from the STUN checks (peer-reflexive), so nothing else is needed.
 
-If the server uses other ports, set them with `iceUdpPort`/`iceTcpPort`.
-
-Server requirements:
-- Accept a WHIP `POST` with `application/sdp` and answer `201` + SDP (+ `Location`).
-- All WebRTC media on **one fixed UDP port** (UDP mux), not random ports.
-- ICE full or ICE-lite, accepting peer-reflexive candidates. pion and MediaMTX
-  both do this by default. The server's candidates in the answer don't matter,
-  because the client replaces them.
-- Codecs: Opus 48 kHz stereo/mono, H.264 (packetization-mode=1) and VP8.
-- DTLS-SRTP (standard).
+General requirements, for any other receiver:
+- WHIP `POST` with `application/sdp` returns `201` + SDP answer + `Location`. No trickle.
+- All media on **one fixed UDP port** (UDP mux). Accept peer-reflexive candidates.
+- Opus, H.264 packetization-mode=1 and/or VP8, and PLI/FIR (the libwebrtc encoder honors them).
+- Optional ICE-TCP: enable it with `iceTcpPort(n)` if the server listens for passive ICE-TCP.
 
 ### MediaMTX example (`mediamtx.yml`)
 
 ```yaml
 webrtc: yes
 webrtcAddress: :8890            # MediaMTX default is :8889
-webrtcLocalUDPAddress: :8189    # the fixed UDP port
-webrtcLocalTCPAddress: :8189    # ICE-TCP
+webrtcLocalUDPAddress: :8890    # fixed UDP port (or set iceUdpPort)
+webrtcLocalTCPAddress: :8891    # optional ICE-TCP (then iceTcpPort(8891))
 webrtcIPsFromInterfaces: no
 webrtcAdditionalHosts: [127.0.0.1]
 paths:
@@ -132,10 +136,10 @@ The MediaMTX WHIP URL is `/<path>/whip`. Use
 ### pion example (Go)
 
 ```go
-mux, _ := ice.NewMultiUDPMuxFromPort(8189)       // single UDP port
+mux, _ := ice.NewMultiUDPMuxFromPort(8890)       // single UDP port
 se := webrtc.SettingEngine{}
 se.SetICEUDPMux(mux)
-tcpL, _ := net.ListenTCP("tcp", &net.TCPAddr{Port: 8189})
+tcpL, _ := net.ListenTCP("tcp", &net.TCPAddr{Port: 8891})
 se.SetICETCPMux(webrtc.NewICETCPMux(nil, tcpL, 8)) // optional ICE-TCP
 se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4, webrtc.NetworkTypeTCP4})
 api := webrtc.NewAPI(webrtc.WithSettingEngine(se), webrtc.WithMediaEngine(m))
@@ -145,8 +149,8 @@ api := webrtc.NewAPI(webrtc.WithSettingEngine(se), webrtc.WithMediaEngine(m))
 
 ## Known limits
 
-- Not yet tested end to end against a live receiver. The receiver was not
-  running when this was written.
+- The HTTP contract was checked against the live bridge. A full media session
+  from a real phone has not been tested yet.
 - 127.0.0.1 as an ICE remote depends on libwebrtc gathering on the loopback
   adapter (`networkIgnoreMask = 0`). If a device refuses it, use ICE-TCP or
   point `start()` at the PC's Tailscale IP directly with `rewriteRemoteCandidates(false)`.
