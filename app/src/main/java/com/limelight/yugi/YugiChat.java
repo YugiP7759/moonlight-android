@@ -230,7 +230,7 @@ public class YugiChat extends FrameLayout {
         scroll.setVerticalScrollBarEnabled(false);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             scroll.setOnScrollChangeListener((v, x, y, ox, oy) ->
-                    stickToBottom = y >= list.getHeight() - scroll.getHeight() - dp(24));
+                    stickToBottom = y >= ((ScrollView) v).getChildAt(0).getHeight() - v.getHeight() - dp(24));
         }
         list = new LinearLayout(ctx);
         list.setOrientation(LinearLayout.VERTICAL);
