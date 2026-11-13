@@ -117,8 +117,19 @@ public class YugiLauncher extends Activity {
             showStatus("מתחבר מחדש…", true);
             scheduleRetry(1500);
         } else if (!working) {
-            connect();
+            if (!maybeAskBattery()) connect();
         }
+    }
+
+    /** First run only: our sheet, then the system's battery-optimization dialog. */
+    private boolean maybeAskBattery() {
+        if (!YugiBattery.shouldAsk(this)) return false;
+        askingPermissions = true;
+        YugiBattery.ask(this, () -> askingPermissions = false, () -> {
+            askingPermissions = false;
+            connect();
+        });
+        return true;
     }
 
     @Override
@@ -213,7 +224,7 @@ public class YugiLauncher extends Activity {
     private void onPermissionsDone() {
         askingPermissions = false;
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_PERMS_ASKED, true).apply();
-        connect();
+        if (!maybeAskBattery()) connect();
     }
 
     // ---- connection flow ----

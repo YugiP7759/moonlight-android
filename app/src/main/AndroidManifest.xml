@@ -23,6 +23,8 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- YugiPC: asks once to be exempt from battery optimization (keeps the stream and tunnel alive) -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-feature android:glEsVersion="0x00030000" android:required="true" />
     <!-- We don't need a MulticastLock on API level 34+ because we use NsdManager for mDNS -->

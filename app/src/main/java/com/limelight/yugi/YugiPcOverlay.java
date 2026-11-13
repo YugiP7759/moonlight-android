@@ -18,6 +18,8 @@ import java.util.List;
 public final class YugiPcOverlay {
     public YugiChrome chrome;
     public YugiChat chat;
+    private YugiChrome.Button keyboardButton;
+    private Runnable keyboardAction;
 
     private YugiPcOverlay() {}
 
@@ -27,6 +29,10 @@ public final class YugiPcOverlay {
         if (YugiChat.isChatEnabled()) {
             buttons.add(new YugiChrome.Button(R.drawable.yugi_ic_yugi, "יוגי", () -> { if (o.chat != null) o.chat.toggle(); }));
         }
+        o.keyboardButton = new YugiChrome.Button(R.drawable.yugi_ic_keyboard, "מקלדת", () -> {
+            if (o.keyboardAction != null) o.keyboardAction.run();
+        });
+        buttons.add(o.keyboardButton);
         if (YugiMedia.isAvailable()) {
             YugiChrome.Button[] mic = new YugiChrome.Button[1];
             mic[0] = new YugiChrome.Button(YugiMedia.isMicOn() ? R.drawable.yugi_ic_mic : R.drawable.yugi_ic_mic_off,
@@ -57,6 +63,11 @@ public final class YugiPcOverlay {
         });
         return o;
     }
+
+    /** The toolbar's keyboard button opens / closes the YugiPC keyboard. */
+    public void setKeyboardAction(Runnable r) { keyboardAction = r; }
+
+    public void setKeyboardActive(boolean on) { keyboardButton.setActive(on); }
 
     /** Saves the current frame as the next session's placeholder. */
     public static void captureLastFrame(Activity a, SurfaceView sv) {

@@ -194,6 +194,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private android.widget.ImageView yugiFrozen;
     private int yugiRotation;
     private com.limelight.yugi.YugiChat yugiChat;
+    // YugiPC keyboard: our own keys (no Android IME); the desktop rides up with it inside this wrapper
+    private com.limelight.yugi.YugiKeyboardHost yugiKeys;
+    private FrameLayout yugiDesktop;
+    private com.limelight.yugi.YugiPcOverlay yugiOverlay;
     private com.limelight.yugi.YugiBrandView yugiBrand;
     private boolean connecting = false;
     public boolean connected = false;
@@ -523,6 +527,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             com.limelight.yugi.YugiPcOverlay overlay = com.limelight.yugi.YugiPcOverlay.attach(
                     this, streamContainer.getSurfaceView(), this::yugiOpenGames);
             yugiChat = overlay.chat;
+            yugiOverlay = overlay;
 
             // Fold/unfold or rotation: the window changes size (sometimes without a usable
             // onConfigurationChanged). Watch the real view size and re-stream on any aspect change.
@@ -538,6 +543,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
 
         rootView = streamContainer.getParent();
+        if (yugi) yugiAttachKeyboard();
 
         //串流画面 顶部居中显示
         if(prefConfig.alignDisplayTopCenter){
@@ -864,7 +870,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 .setBitrate(isMetered ? prefConfig.meteredBitrate: prefConfig.bitrate)
                 .setEnableSops(prefConfig.enableSops)
                 .enableLocalAudioPlayback(prefConfig.playHostAudio)
-                .setMaxPacketSize(1392)
+                // YugiPC: the stream always crosses Tailscale (MTU 1280). With the embedded tunnel the host is
+                // 127.0.0.1, which auto-detection takes for LAN and keeps 1392, so every video packet would be
+                // fragmented and lost twice as often on shaky Wi-Fi. 1024 fits in one tunnel packet.
+                .setMaxPacketSize(yugi ? 1024 : 1392)
                 .setRemoteConfiguration(StreamConfiguration.STREAM_CFG_AUTO) // NvConnection will perform LAN and VPN detection
                 .setSupportedVideoFormats(supportedVideoFormats)
                 .setAttachedGamepadMask(gamepadMask)
@@ -1797,6 +1806,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     @Override
     protected void onDestroy() {
         if (yugiChat != null) yugiChat.release();
+        if (yugiKeys != null) yugiKeys.stop();
         stopMicrophoneCapture();
         super.onDestroy();
 
@@ -2639,7 +2649,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         float scaleY = streamView.getScaleY();
 
         float normalizedX = (rawX - streamView.getX()) / scaleX;
-        float normalizedY = (rawY - streamView.getY()) / scaleY;
+        // YugiPC: the stream's wrapper may be shifted up with the keyboard
+        float wrapY = yugiDesktop != null ? yugiDesktop.getTranslationY() : 0f;
+        float normalizedY = (rawY - streamView.getY() - wrapY) / scaleY;
 
         return new float[] { normalizedX, normalizedY };
     }
@@ -3520,6 +3532,11 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             //
             // NB: This is still needed even when we call the newer requestUnbufferedDispatch()!
             view.requestUnbufferedDispatch(event);
+            if (yugiKeys != null) {
+                // where the user last touched the desktop: the keyboard's fallback caret
+                yugiKeys.noteTouch(view == streamContainer ? event.getY()
+                        : event.getY() - streamContainer.getY() - yugiDesktop.getTranslationY());
+            }
         }
 
         return handleMotionEvent(view, event);
@@ -3539,6 +3556,42 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     public void stageComplete(String stage) {
+    }
+
+    /**
+     * YugiPC keyboard: puts the stream in a wrapper the keyboard can move (PanZoomHandler owns the
+     * stream's own translation), then attaches our keyboard and the server's caret events.
+     */
+    private void yugiAttachKeyboard() {
+        ViewGroup parent = (ViewGroup) streamContainer.getParent();
+        int index = parent.indexOfChild(streamContainer);
+        ViewGroup.LayoutParams lp = streamContainer.getLayoutParams();
+        parent.removeView(streamContainer);
+        yugiDesktop = new FrameLayout(this);
+        yugiDesktop.setClipChildren(false);
+        yugiDesktop.addView(streamContainer, lp);
+        parent.addView(yugiDesktop, index, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        streamContainer.requestFocus();
+
+        yugiKeys = com.limelight.yugi.YugiKeyboardHost.attach(this, yugiDesktop, streamContainer,
+                new com.limelight.yugi.YugiKeyEngine.Sender() {
+                    @Override public void text(String s) {
+                        if (conn != null && connected) conn.sendUtf8Text(s);
+                    }
+                    @Override public void key(int androidKeyCode, boolean down, int mods) {
+                        if (conn == null || !connected || keyboardTranslator == null) return;
+                        short vk = keyboardTranslator.translate(androidKeyCode, 0, -1);
+                        if (vk == 0) return;
+                        conn.sendKeyboardInput(vk, down ? KeyboardPacket.KEY_DOWN : KeyboardPacket.KEY_UP,
+                                (byte) mods, (byte) 0);
+                    }
+                });
+        if (yugiOverlay != null) {
+            yugiOverlay.setKeyboardAction(yugiKeys::toggle);
+            yugiKeys.setStateListener(yugiOverlay::setKeyboardActive);
+        }
+        yugiKeys.start();
     }
 
     /** YugiPC: true if the window's aspect ratio no longer matches the stream (rotation / fold / unfold). */
