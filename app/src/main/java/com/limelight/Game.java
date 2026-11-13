@@ -379,6 +379,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             prefConfig.enableMultiTouchGestures = false; // let the host see every finger
             prefConfig.enableCommitText = false;         // no phone keyboard: the PC shows its own on-screen keyboard
             prefConfig.enableFloatingButton = false;
+            prefConfig.showOverlayZoomToggleButton = false; // the YugiPC toolbar is the only floating control
             prefConfig.bitrate = prefConfig.fps > 60
                     ? com.limelight.yugi.YugiConfig.BITRATE_120_KBPS : com.limelight.yugi.YugiConfig.BITRATE_60_KBPS;
         }
