@@ -128,8 +128,14 @@
             android:resizeableActivity="true"
             android:screenOrientation="fullSensor"
             android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
-            android:windowSoftInputMode="adjustResize"
+            android:windowSoftInputMode="adjustNothing"
             android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection|density" />
+        <!-- YugiPC: file picker host for the Yugi chat -->
+        <activity
+            android:name=".yugi.YugiPickActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true" />
         <!-- YugiPC: the only launcher entry. Connects straight to the desktop stream. -->
         <activity
             android:name=".yugi.YugiLauncher"

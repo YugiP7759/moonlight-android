@@ -1,8 +1,7 @@
 name: YugiPC APK (private, with embedded Tailscale)
 
 on:
-  push:
-    branches: [yugipc]
+  # APK builds are started by hand after the visual QA is approved
   workflow_dispatch:
   repository_dispatch:
     types: [tsbridge-updated]

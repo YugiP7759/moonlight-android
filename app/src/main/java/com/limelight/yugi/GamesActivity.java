@@ -4,14 +4,15 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
-import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.TypedValue;
-import android.view.Gravity;
+import android.util.Base64;
+import android.view.PixelCopy;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
@@ -25,57 +26,60 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.Button;
 import android.widget.FrameLayout;
-import android.widget.LinearLayout;
-import android.widget.SeekBar;
-import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.webkit.WebSettingsCompat;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
 
 import com.limelight.LimeLog;
+import com.limelight.R;
 
 import org.json.JSONObject;
+import org.json.JSONTokener;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
 /**
- * "משחקים": Boosteroid cloud gaming in a full-screen WebView, with our own editable virtual
- * gamepad (fed to the page through a Gamepad API polyfill), fit/fill display and FPS/ping stats.
+ * "משחקים": Boosteroid cloud gaming in an edge-to-edge WebView, with our own pad (Gamepad API polyfill),
+ * contain / cover / fill display, a forced 16:9 stream option, FPS/ping HUD and the Yugi chat.
  */
 public class GamesActivity extends Activity {
     public static final String URL = "https://cloud.boosteroid.com/";
     private static final String PREFS = "yugipc_games";
+    private static final String[] FITS = {"contain", "cover", "fill"};
+    private static final String[] FIT_NAMES = {"התאם (פסים)", "מלא (חיתוך)", "מתוח"};
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private FrameLayout root;
     private WebView web;
     private VirtualPadView pad;
-    private TextView statsView;
-    private View editButton;
-    private TextView padToggle;
-    private LinearLayout editBar;
-    private SeekBar sizeBar, alphaBar;
+    private YugiChrome chrome;
+    private YugiChrome.Button padButton;
+    private YugiPadEditor editor;
+    private YugiChat chat;
     private View customView;
     private boolean statsOn;
-    private String fit = "contain";
+    private String fit = "cover";
+    private boolean force169 = true;
+    private boolean siteMenu;
     private String injectJs;
     private boolean landscape;
     private String layoutKey;
-    private YugiChat chat;
+    private int imeInset;
 
     private final Runnable statsTick = new Runnable() {
         @Override
         public void run() {
             if (!statsOn) return;
             web.evaluateJavascript("(function(){if(!window.__yugi)return '';__yugi.stats();return __yugi.lastStats||'';})()",
-                    v -> showStats(v));
+                    GamesActivity.this::showStats);
             ui.postDelayed(this, 1000);
         }
     };
@@ -88,22 +92,25 @@ public class GamesActivity extends Activity {
         public String state() { return pad.jsState(); }
     }
 
-    private int dp(float v) {
-        return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
+    private static FrameLayout.LayoutParams match() {
+        return new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
     }
 
-    @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            getWindow().getAttributes().layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             getWindow().getAttributes().layoutInDisplayCutoutMode =
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         }
         SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
-        fit = sp.getString("fit", "contain");
+        fit = sp.getString("fit2", "cover");
         statsOn = sp.getBoolean("stats", false);
+        force169 = sp.getBoolean("force169", true);
 
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -120,11 +127,20 @@ public class GamesActivity extends Activity {
         updateLayoutKey();
         goImmersive();
 
-        web.loadUrl(URL);
-    }
+        // Edge to edge; the keyboard only pushes the page up when the chat is closed (login fields)
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            int ime = 0;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) ime = insets.getInsets(WindowInsets.Type.ime()).bottom;
+            if (ime != imeInset) {
+                imeInset = ime;
+                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) web.getLayoutParams();
+                lp.bottomMargin = (chat != null && chat.isOpen()) ? 0 : ime;
+                web.setLayoutParams(lp);
+            }
+            return insets;
+        });
 
-    private static FrameLayout.LayoutParams match() {
-        return new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+        web.loadUrl(URL);
     }
 
     // ---------------------------------------------------------------- WebView
@@ -141,7 +157,6 @@ public class GamesActivity extends Activity {
         s.setSupportMultipleWindows(false);            // sign-in popups open in place
         s.setJavaScriptCanOpenWindowsAutomatically(true);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
-        // Present as mobile Chrome (same engine version), without the WebView "wv" marker
         String ua = WebSettings.getDefaultUserAgent(this)
                 .replace("; wv)", ")")
                 .replaceAll("Version/\\d+(\\.\\d+)* ", "");
@@ -150,6 +165,7 @@ public class GamesActivity extends Activity {
             WebSettingsCompat.setRequestedWithHeaderOriginAllowList(s, Collections.emptySet());
         }
         web.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        web.setBackgroundColor(Color.BLACK);
 
         CookieManager cm = CookieManager.getInstance();
         cm.setAcceptCookie(true);
@@ -171,12 +187,13 @@ public class GamesActivity extends Activity {
         web.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                return false; // everything stays inside the app (incl. sign-in)
+                return false;
             }
 
             @Override
-            public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+            public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 if (injectLate && injectJs != null) view.evaluateJavascript(injectJs, null);
+                applyPageSettings();
             }
 
             @Override
@@ -190,7 +207,6 @@ public class GamesActivity extends Activity {
         web.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onPermissionRequest(PermissionRequest request) {
-                // WebRTC (mic for voice chat etc.) on Boosteroid only
                 String host = request.getOrigin() != null ? request.getOrigin().getHost() : "";
                 if (host != null && (host.equals("boosteroid.com") || host.endsWith(".boosteroid.com"))) {
                     request.grant(request.getResources());
@@ -201,7 +217,6 @@ public class GamesActivity extends Activity {
 
             @Override
             public void onShowCustomView(View view, CustomViewCallback callback) {
-                // Element fullscreen: show it under our controller
                 if (customView != null) root.removeView(customView);
                 customView = view;
                 root.addView(view, 1, match());
@@ -221,14 +236,11 @@ public class GamesActivity extends Activity {
 
     private String loadAsset(String name) {
         try (InputStream in = getAssets().open(name)) {
-            byte[] buf = new byte[in.available()];
-            int n = 0;
-            while (n < buf.length) {
-                int r = in.read(buf, n, buf.length - n);
-                if (r < 0) break;
-                n += r;
-            }
-            return new String(buf, 0, n, StandardCharsets.UTF_8);
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            return new String(out.toByteArray(), StandardCharsets.UTF_8);
         } catch (Exception e) {
             LimeLog.warning("YugiPC games: no " + name + ": " + e);
             return null;
@@ -236,77 +248,93 @@ public class GamesActivity extends Activity {
     }
 
     private void applyPageSettings() {
-        web.evaluateJavascript("window.__yugi&&(__yugi.setFit('" + fit + "'),__yugi.setHideSiteController("
-                + pad.isPadEnabled() + "),__yugi.announce&&__yugi.announce())", null);
+        web.evaluateJavascript("window.__yugi&&__yugi.configure(" + configJson() + ")", null);
     }
 
-    // ---------------------------------------------------------------- overlay UI
+    private String configJson() {
+        try {
+            return new JSONObject()
+                    .put("fit", fit)
+                    .put("hideSiteController", pad.isPadEnabled())
+                    .put("showSiteMenu", siteMenu)
+                    .put("force169", force169)
+                    .toString();
+        } catch (Exception e) {
+            return "{}";
+        }
+    }
+
+    // ---------------------------------------------------------------- overlay
 
     private void buildOverlay() {
-        statsView = new TextView(this);
-        statsView.setTextColor(Color.WHITE);
-        statsView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        statsView.setBackgroundColor(0x88000000);
-        statsView.setPadding(dp(8), dp(4), dp(8), dp(4));
-        statsView.setVisibility(statsOn ? View.VISIBLE : View.GONE);
-        FrameLayout.LayoutParams slp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.START);
-        slp.leftMargin = dp(12);
-        slp.topMargin = dp(12);
-        root.addView(statsView, slp);
-        if (statsOn) ui.post(statsTick);
+        List<YugiChrome.Button> buttons = new ArrayList<>();
+        if (YugiChat.isEnabled()) {
+            buttons.add(new YugiChrome.Button(R.drawable.yugi_ic_yugi, "יוגי", () -> { if (chat != null) chat.toggle(); }));
+        }
+        padButton = new YugiChrome.Button(R.drawable.yugi_ic_gamepad, "הצג או הסתר שלט", this::togglePad);
+        padButton.active = pad.isPadEnabled();
+        buttons.add(padButton);
+        buttons.add(new YugiChrome.Button(R.drawable.yugi_ic_edit, "עריכת שלט", this::startEditing));
+        buttons.add(new YugiChrome.Button(R.drawable.yugi_ic_menu, "תפריט",
+                () -> YugiNav.showPanel(this, menuItems(), chrome.getReservedTop())));
 
-        // Edit button: long press enters edit mode
-        TextView edit = new TextView(this);
-        edit.setText("✎");
-        edit.setTextColor(Color.WHITE);
-        edit.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
-        edit.setGravity(Gravity.CENTER);
-        edit.setContentDescription("עריכת שלט (לחיצה ארוכה)");
-        GradientDrawable bg = new GradientDrawable();
-        bg.setShape(GradientDrawable.OVAL);
-        bg.setColor(0x66000000);
-        edit.setBackground(bg);
-        edit.setAlpha(0.4f);
-        edit.setOnLongClickListener(v -> { pad.setEditing(true); return true; });
-        edit.setOnClickListener(v -> android.widget.Toast.makeText(this,
-                "לחיצה ארוכה לעריכת השלט", android.widget.Toast.LENGTH_SHORT).show());
-        FrameLayout.LayoutParams elp = new FrameLayout.LayoutParams(dp(40), dp(40), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        elp.topMargin = dp(12);
-        root.addView(edit, elp);
-        editButton = edit;
-        editButton.setVisibility(pad.isPadEnabled() ? View.VISIBLE : View.GONE);
+        editor = new YugiPadEditor(this, new YugiPadEditor.Actions() {
+            @Override public void onSave() { pad.saveLayout(); pad.setEditing(false); }
+            @Override public void onCancel() { pad.setEditing(false); pad.loadLayout(layoutKey, landscape); }
+            @Override public void onReset() { pad.resetLayout(landscape); }
+            @Override public void onSize(float dp) { pad.setSelectedSize(dp); }
+            @Override public void onAlpha(float a) { pad.setSelectedAlpha(a); }
+        });
+        root.addView(editor, match());
+        pad.setEditListener(new VirtualPadView.EditListener() {
+            @Override public void onEditModeChanged(boolean editing) {
+                editor.setVisibility(editing ? View.VISIBLE : View.GONE);
+                chrome.setChromeVisible(!editing);
+            }
+            @Override public void onSelectionChanged(VirtualPadView.Control c) {
+                editor.setSelection(c, pad.selectedCenterY(), root.getHeight());
+            }
+        });
 
-        // Pad toggle: small fixed button left of the edit button; stays (faded) when the pad is hidden
-        padToggle = new TextView(this);
-        padToggle.setText("\uD83C\uDFAE");
-        padToggle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
-        padToggle.setGravity(Gravity.CENTER);
-        GradientDrawable tbg = new GradientDrawable();
-        tbg.setShape(GradientDrawable.OVAL);
-        tbg.setColor(0x66000000);
-        padToggle.setBackground(tbg);
-        padToggle.setOnClickListener(v -> { if (!pad.isEditing()) togglePad(); });
-        FrameLayout.LayoutParams tlp = new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        tlp.topMargin = dp(8);
-        tlp.rightMargin = dp(56); // centre 56dp left of the edit button's centre
-        root.addView(padToggle, tlp);
-        updatePadToggle();
+        chrome = new YugiChrome(this, buttons);
+        root.addView(chrome, match());
+        chrome.setReservedTopListener(pad::setTopInset);
+        chrome.setHudVisible(statsOn);
+        if (statsOn) {
+            chrome.setStatsText("…");
+            ui.post(statsTick);
+        }
+        chrome.poke();
 
-        buildEditBar();
+        chat = YugiChat.attach(this, new YugiChat.Host() {
+            @Override public void captureScreen(YugiChat.BitmapCallback cb) { snapshot(cb); }
+            @Override public void pickFile() { YugiChat.openPicker(GamesActivity.this); }
+            @Override public int reservedTop() { return chrome.getReservedTop(); }
+        });
+    }
 
-        YugiNav.attachMenuButton(this, this::menuItems);
-        chat = YugiChat.attach(this);
+    private void startEditing() {
+        if (!pad.isPadEnabled()) togglePad();
+        pad.setEditing(true);
     }
 
     private List<YugiNav.Item> menuItems() {
+        int fi = Math.max(0, Arrays.asList(FITS).indexOf(fit));
         List<YugiNav.Item> items = new ArrayList<>();
         items.add(new YugiNav.Item("המחשב שלי", false, () -> YugiNav.openPc(this)));
         items.add(new YugiNav.Item("משחקים", true, null));
-        items.add(new YugiNav.Item(pad.isPadEnabled() ? "הסתר שלט" : "הצג שלט", false, this::togglePad));
-        items.add(new YugiNav.Item("cover".equals(fit) ? "תצוגה: מלא (לחץ להתאם)" : "תצוגה: התאם (לחץ למלא)",
-                false, this::toggleFit));
-        items.add(new YugiNav.Item(statsOn ? "הסתר סטטיסטיקות" : "סטטיסטיקות (FPS ופינג)", false, this::toggleStats));
+        items.add(YugiNav.Item.section("תצוגה"));
+        items.add(new YugiNav.Item("תמונה: " + FIT_NAMES[fi], false, this::cycleFit));
+        items.add(new YugiNav.Item(force169 ? "רזולוציה: 16:9 (1920×1080)" : "רזולוציה: לפי המסך", false, this::toggle169));
+        items.add(new YugiNav.Item(statsOn ? "סטטיסטיקות: מוצגות" : "סטטיסטיקות: מוסתרות", false, this::toggleStats));
+        items.add(YugiNav.Item.section("שלט"));
+        items.add(new YugiNav.Item("הגדרות שלט", false, this::openPadSettings));
+        items.add(new YugiNav.Item(pad.getSettings().gyro ? "ג'ירוסקופ: פועל" : "ג'ירוסקופ: כבוי", false, this::toggleGyro));
+        items.add(new YugiNav.Item("כפתור Menu (Start)", false, () -> pad.pulse(VirtualPadView.START, 150)));
+        items.add(new YugiNav.Item("כפתור View (Back)", false, () -> pad.pulse(VirtualPadView.BACK, 150)));
+        items.add(new YugiNav.Item("כפתור Xbox (בית)", false, () -> pad.pulse(VirtualPadView.HOME, 150)));
+        items.add(YugiNav.Item.section("Boosteroid"));
+        items.add(new YugiNav.Item(siteMenu ? "הסתר את התפריט של Boosteroid" : "התפריט של Boosteroid", false, this::toggleSiteMenu));
         items.add(new YugiNav.Item("טען מחדש", false, () -> web.reload()));
         return items;
     }
@@ -314,138 +342,96 @@ public class GamesActivity extends Activity {
     private void togglePad() {
         boolean on = !pad.isPadEnabled();
         pad.setPadEnabled(on);
-        editButton.setVisibility(on ? View.VISIBLE : View.GONE);
-        updatePadToggle();
+        padButton.setActive(on);
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("pad", on).apply();
         applyPageSettings();
     }
 
-    private void updatePadToggle() {
-        boolean on = pad.isPadEnabled();
-        padToggle.setAlpha(on ? 0.45f : 0.3f);
-        padToggle.setContentDescription(on ? "הסתר שלט" : "הצג שלט");
+    private void cycleFit() {
+        int i = (Arrays.asList(FITS).indexOf(fit) + 1) % FITS.length;
+        fit = FITS[i];
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("fit2", fit).apply();
+        applyPageSettings();
+        Toast.makeText(this, "תמונה: " + FIT_NAMES[i], Toast.LENGTH_SHORT).show();
     }
 
-    private void toggleFit() {
-        fit = "cover".equals(fit) ? "contain" : "cover";
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("fit", fit).apply();
+    private void toggle169() {
+        force169 = !force169;
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("force169", force169).apply();
         applyPageSettings();
+        Toast.makeText(this, "ייכנס לתוקף בסשן הבא של Boosteroid", Toast.LENGTH_LONG).show();
+    }
+
+    private void toggleSiteMenu() {
+        siteMenu = !siteMenu;
+        applyPageSettings();
+    }
+
+    private void toggleGyro() {
+        PadSettings s = pad.getSettings();
+        s.gyro = !s.gyro;
+        s.save(this);
+        pad.applySettings(s);
+    }
+
+    private void openPadSettings() {
+        final YugiPadSettingsView[] ref = new YugiPadSettingsView[1];
+        ref[0] = new YugiPadSettingsView(this, pad.getSettings(), new YugiPadSettingsView.Listener() {
+            @Override public void onChanged(PadSettings s) { pad.applySettings(s); }
+            @Override public void onClose() { root.removeView(ref[0]); }
+        });
+        root.addView(ref[0], match());
     }
 
     private void toggleStats() {
         statsOn = !statsOn;
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("stats", statsOn).apply();
-        statsView.setVisibility(statsOn ? View.VISIBLE : View.GONE);
+        chrome.setHudVisible(statsOn);
         ui.removeCallbacks(statsTick);
         if (statsOn) {
-            statsView.setText("…");
+            chrome.setStatsText("…");
             ui.post(statsTick);
         }
     }
 
     private void showStats(String jsResult) {
         try {
-            String s = jsResult;
-            if (s == null || s.equals("null") || s.equals("\"\"")) {
-                statsView.setText("אין סטרים");
+            if (jsResult == null || jsResult.equals("null") || jsResult.equals("\"\"")) {
+                chrome.setStatsText("אין סטרים");
                 return;
             }
-            // evaluateJavascript returns a JSON-encoded string
-            s = new org.json.JSONTokener(s).nextValue().toString();
+            String s = new JSONTokener(jsResult).nextValue().toString();
             JSONObject o = new JSONObject(s);
-            String fps = o.isNull("fps") ? "–" : String.valueOf(o.getInt("fps"));
-            String ping = o.isNull("ping") ? "–" : o.getInt("ping") + "ms";
-            String res = o.optInt("w") > 0 ? "  " + o.optInt("w") + "x" + o.optInt("h") : "";
-            statsView.setText("FPS " + fps + "   פינג " + ping + res);
+            chrome.setStats(o.isNull("fps") ? null : o.getInt("fps"), o.isNull("ping") ? null : o.getInt("ping"),
+                    o.optInt("w"), o.optInt("h"));
         } catch (Exception e) {
-            statsView.setText("אין סטרים");
+            chrome.setStatsText("אין סטרים");
         }
     }
 
-    private void buildEditBar() {
-        editBar = new LinearLayout(this);
-        editBar.setOrientation(LinearLayout.VERTICAL);
-        editBar.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        editBar.setPadding(dp(16), dp(12), dp(16), dp(12));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(0xE6111827);
-        bg.setCornerRadius(dp(14));
-        editBar.setBackground(bg);
-        editBar.setVisibility(View.GONE);
-
-        TextView hint = new TextView(this);
-        hint.setTextColor(Color.WHITE);
-        hint.setText("גרור כפתור כדי להזיז. בחר כפתור כדי לשנות גודל ושקיפות.");
-        editBar.addView(hint);
-
-        sizeBar = slider("גודל", 30, 220, v -> pad.setSelectedSize(v));
-        alphaBar = slider("שקיפות", 10, 100, v -> pad.setSelectedAlpha(v / 100f));
-
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        Button save = new Button(this);
-        save.setText("שמור");
-        save.setOnClickListener(v -> { pad.saveLayout(); pad.setEditing(false); });
-        Button cancel = new Button(this);
-        cancel.setText("ביטול");
-        cancel.setOnClickListener(v -> { pad.setEditing(false); pad.loadLayout(layoutKey, landscape); });
-        Button reset = new Button(this);
-        reset.setText("איפוס");
-        reset.setOnClickListener(v -> pad.resetLayout(landscape));
-        row.addView(save);
-        row.addView(cancel);
-        row.addView(reset);
-        editBar.addView(row);
-
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(320),
-                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        lp.topMargin = dp(60);
-        root.addView(editBar, lp);
-
-        pad.setEditListener(new VirtualPadView.EditListener() {
-            @Override
-            public void onEditModeChanged(boolean editing) {
-                editBar.setVisibility(editing ? View.VISIBLE : View.GONE);
-            }
-
-            @Override
-            public void onSelectionChanged(VirtualPadView.Control c) {
-                boolean has = c != null;
-                sizeBar.setEnabled(has);
-                alphaBar.setEnabled(has);
-                if (has) {
-                    sizeBar.setProgress(Math.round(c.sizeDp) - 30);
-                    alphaBar.setProgress(Math.round(c.alpha * 100) - 10);
+    /** Current game frame: from the page's video element; falls back to a window copy. */
+    private void snapshot(YugiChat.BitmapCallback cb) {
+        web.evaluateJavascript("window.__yugi&&__yugi.snapshot?__yugi.snapshot():''", v -> {
+            Bitmap b = null;
+            try {
+                String s = new JSONTokener(v).nextValue().toString();
+                int comma = s.indexOf(',');
+                if (s.startsWith("data:image") && comma > 0) {
+                    byte[] data = Base64.decode(s.substring(comma + 1), Base64.DEFAULT);
+                    b = BitmapFactory.decodeByteArray(data, 0, data.length);
                 }
+            } catch (Exception ignored) {}
+            if (b != null || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                cb.onBitmap(b);
+                return;
             }
+            Bitmap win = Bitmap.createBitmap(root.getWidth(), root.getHeight(), Bitmap.Config.ARGB_8888);
+            PixelCopy.request(getWindow(), win, r -> cb.onBitmap(r == PixelCopy.SUCCESS ? win : null), ui);
         });
-    }
-
-    private interface FloatSetter { void set(float v); }
-
-    private SeekBar slider(String label, int min, int max, FloatSetter setter) {
-        TextView t = new TextView(this);
-        t.setTextColor(Color.WHITE);
-        t.setText(label);
-        t.setPadding(0, dp(8), 0, 0);
-        editBar.addView(t);
-        SeekBar sb = new SeekBar(this);
-        sb.setMax(max - min);
-        sb.setEnabled(false);
-        sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
-                if (fromUser) setter.set(p + min);
-            }
-            @Override public void onStartTrackingTouch(SeekBar s) {}
-            @Override public void onStopTrackingTouch(SeekBar s) {}
-        });
-        editBar.addView(sb, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)));
-        return sb;
     }
 
     // ---------------------------------------------------------------- screen changes
 
-    /** Layout per screen: cover / inner and landscape / portrait. */
     private void updateLayoutKey() {
         int w, h;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -508,7 +494,7 @@ public class GamesActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
-        web.onPause(); // pauses media while the desktop stream is in front
+        web.onPause();
         ui.removeCallbacks(statsTick);
         CookieManager.getInstance().flush();
     }
@@ -527,7 +513,7 @@ public class GamesActivity extends Activity {
     @Override
     public void onBackPressed() {
         if (chat != null && chat.isOpen()) {
-            chat.toggle();
+            chat.setOpen(false);
         } else if (pad.isEditing()) {
             pad.setEditing(false);
             pad.loadLayout(layoutKey, landscape);

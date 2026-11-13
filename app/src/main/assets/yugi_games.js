@@ -109,27 +109,101 @@
   // ---------------------------------------------------------------- display
   var style = null;
   function css() {
-    if (!style) {
+    if (!style || !style.isConnected) {
       style = document.createElement('style');
       style.id = 'yugi-style';
       (document.head || document.documentElement).appendChild(style);
     }
     return style;
   }
-  Y.fit = 'contain';
-  Y.hideSiteController = true;
+  Y.cfg = { fit: 'cover', hideSiteController: true, showSiteMenu: false, force169: true };
+  function isStreamPage() { return !!document.getElementById('remotevideo') || /\/static\/streaming\//.test(location.pathname); }
   Y.apply = function () {
-    var rules = 'video{object-fit:' + Y.fit + ' !important;}';
-    if (Y.hideSiteController) {
-      rules += '#virtual_controller,#virtual_mouse,#virtual_wasd{display:none !important;}';
+    var c = Y.cfg, rules = '';
+    if (isStreamPage()) {
+      // Edge to edge: page and every player container fill the viewport; the video fills it per mode
+      rules += 'html,body{width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;' +
+        'margin:0!important;padding:0!important;overflow:hidden!important;background:#000!important;}';
+      rules += 'video#remotevideo,#remotevideo{position:fixed!important;left:0!important;top:0!important;right:auto!important;bottom:auto!important;' +
+        'width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;min-width:0!important;min-height:0!important;' +
+        'margin:0!important;transform:none!important;object-fit:' + c.fit + '!important;object-position:50% 50%!important;background:#000!important;}';
+      if (c.hideSiteController) {
+        rules += '#virtual_controller,#virtual_mouse,#virtual_wasd{display:none!important;}';
+      }
+      if (!c.showSiteMenu) {
+        rules += '#menu{display:none!important;}';
+      }
     }
     css().textContent = rules;
+    // The player may live in a shadow root or a same-origin iframe
+    try {
+      var frames = document.querySelectorAll('iframe');
+      for (var i = 0; i < frames.length; i++) {
+        var w = frames[i].contentWindow;
+        if (w && w.__yugi && w.__yugi.configure) w.__yugi.configure(c);
+      }
+    } catch (e) {}
+    var v = Y.video();
+    if (v && v.getRootNode && v.getRootNode() !== document && v.getRootNode().host) {
+      var sr = v.getRootNode();
+      var st = sr.getElementById ? sr.getElementById('yugi-style') : null;
+      if (!st) { st = document.createElement('style'); st.id = 'yugi-style'; sr.appendChild(st); }
+      st.textContent = 'video{width:100%!important;height:100%!important;object-fit:' + c.fit + '!important;}';
+    }
   };
-  Y.setFit = function (mode) { Y.fit = mode === 'cover' ? 'cover' : 'contain'; Y.apply(); };
-  Y.setHideSiteController = function (on) { Y.hideSiteController = !!on; Y.apply(); };
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', Y.apply);
-  } else {
+  Y.configure = function (c) {
+    for (var k in c) Y.cfg[k] = c[k];
     Y.apply();
+  };
+  Y.setFit = function (mode) { Y.configure({ fit: mode }); };
+  Y.video = function () {
+    var v = document.getElementById('remotevideo') || document.querySelector('video');
+    if (v) return v;
+    var all = document.querySelectorAll('*');
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].shadowRoot) { var sv = all[i].shadowRoot.querySelector('video'); if (sv) return sv; }
+    }
+    return null;
+  };
+  // Re-apply when the site re-renders the player
+  var mo = new MutationObserver(function () { if (isStreamPage() && !document.getElementById('yugi-style')) Y.apply(); });
+  function startObserver() { try { mo.observe(document.documentElement, { childList: true, subtree: true }); } catch (e) {} }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { Y.apply(); startObserver(); });
+  } else {
+    Y.apply(); startObserver();
   }
+
+  // ---------------------------------------------------------------- 16:9 stream
+  // Boosteroid sizes the stream from the screen (5:4 on the Fold's inner screen). Ask for 1920x1080.
+  function patchResolution() {
+    try {
+      /* global SessionHandler */
+      if (typeof SessionHandler !== 'undefined' && SessionHandler.getWindowResolution && !SessionHandler.__yugiPatched) {
+        var orig = SessionHandler.getWindowResolution;
+        SessionHandler.getWindowResolution = async function () {
+          if (Y.cfg.force169) return { width: 1920, height: 1080 };
+          return orig.apply(this, arguments);
+        };
+        SessionHandler.__yugiPatched = true;
+        return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+  var tries = 0;
+  var rt = setInterval(function () { if (patchResolution() || ++tries > 200) clearInterval(rt); }, 25);
+
+  // ---------------------------------------------------------------- snapshot
+  Y.snapshot = function () {
+    var v = Y.video();
+    if (!v || !v.videoWidth) return '';
+    try {
+      var s = Math.min(1, 1920 / Math.max(v.videoWidth, v.videoHeight));
+      var cv = document.createElement('canvas');
+      cv.width = Math.round(v.videoWidth * s); cv.height = Math.round(v.videoHeight * s);
+      cv.getContext('2d').drawImage(v, 0, 0, cv.width, cv.height);
+      return cv.toDataURL('image/jpeg', 0.85);
+    } catch (e) { return ''; }
+  };
 })();

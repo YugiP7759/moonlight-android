@@ -406,7 +406,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         if (getIntent().getBooleanExtra(EXTRA_YUGI, false)) {
             // YugiPC: the Android soft keyboard never shows during the stream (physical keyboards still work)
             getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
-                    | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN); // pan only for the Yugi chat field
+                    | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING); // the Yugi chat follows IME insets itself
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                getWindow().setDecorFitsSystemWindows(false); // deliver IME insets to the chat
+            }
         }
 
         // Inflate the content
@@ -503,14 +506,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         if (yugi) {
             yugiRotation = getWindowManager().getDefaultDisplay().getRotation();
             yugiFrozen = com.limelight.yugi.YugiTransition.addFrozenFrame(this, true);
-            if (com.limelight.yugi.YugiMedia.isAvailable()) {
-                com.limelight.yugi.YugiOverlay.attach(this);
-            }
             com.limelight.yugi.YugiFps.reset(() -> runOnUiThread(this::yugiRestart));
-            com.limelight.yugi.YugiNav.attachMenuButton(this, () -> java.util.Arrays.asList(
-                    new com.limelight.yugi.YugiNav.Item("המחשב שלי", true, null),
-                    new com.limelight.yugi.YugiNav.Item("משחקים", false, this::yugiOpenGames)));
-            yugiChat = com.limelight.yugi.YugiChat.attach(this);
+            com.limelight.yugi.YugiPcOverlay overlay = com.limelight.yugi.YugiPcOverlay.attach(
+                    this, streamContainer.getSurfaceView(), this::yugiOpenGames);
+            yugiChat = overlay.chat;
 
             // Fold/unfold or rotation: the window changes size (sometimes without a usable
             // onConfigurationChanged). Watch the real view size and re-stream on any aspect change.

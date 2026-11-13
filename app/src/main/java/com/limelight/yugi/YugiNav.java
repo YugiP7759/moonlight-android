@@ -2,23 +2,17 @@ package com.limelight.yugi;
 
 import android.app.Activity;
 import android.content.Intent;
-import android.graphics.Color;
-import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
-import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.util.List;
 
-/**
- * Switching between "המחשב שלי" (desktop stream) and "משחקים" (Boosteroid), through a small
- * semi-transparent floating button that opens a side panel.
- */
+/** Switching between "המחשב שלי" and "משחקים", and the shared side menu (same design system). */
 public final class YugiNav {
     /** Set when the user picks "המחשב שלי" from the games screen: the launcher connects right away. */
     public static volatile boolean connectNow;
@@ -28,19 +22,21 @@ public final class YugiNav {
     public static final class Item {
         final String label;
         final boolean current;
+        final boolean section;
         final Runnable action;
 
         public Item(String label, boolean current, Runnable action) {
+            this(label, current, false, action);
+        }
+
+        private Item(String label, boolean current, boolean section, Runnable action) {
             this.label = label;
             this.current = current;
+            this.section = section;
             this.action = action;
         }
-    }
 
-    public interface Items { List<Item> get(); }
-
-    private static int dp(Activity a, float v) {
-        return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, a.getResources().getDisplayMetrics());
+        public static Item section(String label) { return new Item(label, false, true, null); }
     }
 
     public static void openGames(Activity from) {
@@ -58,73 +54,70 @@ public final class YugiNav {
         from.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
     }
 
-    /** Adds the floating menu button (top end corner). Returns it. */
-    public static View attachMenuButton(Activity a, Items items) {
-        TextView b = new TextView(a);
-        b.setText("☰");
-        b.setTextColor(Color.WHITE);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-        b.setGravity(Gravity.CENTER);
-        b.setContentDescription("תפריט");
-        GradientDrawable bg = new GradientDrawable();
-        bg.setShape(GradientDrawable.OVAL);
-        bg.setColor(0x66000000);
-        b.setBackground(bg);
-        b.setAlpha(0.45f);
-        int size = dp(a, 44);
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(size, size, Gravity.TOP | Gravity.END);
-        lp.topMargin = dp(a, 12);
-        lp.rightMargin = dp(a, 12);
-        b.setOnClickListener(v -> showPanel(a, items.get()));
-        a.addContentView(b, lp);
-        return b;
+    /** Side panel at the end edge, below the toolbar; tapping outside closes it. */
+    public static View showPanel(Activity a, List<Item> items, int topPx) {
+        ViewGroup content = a.findViewById(android.R.id.content);
+        FrameLayout scrim = buildPanel(a, items, topPx, () -> {});
+        scrim.setTag("yugi-menu");
+        content.addView(scrim, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        return scrim;
     }
 
-    /** Side panel sliding in from the end edge, closed by tapping outside it. */
-    public static void showPanel(Activity a, List<Item> items) {
-        ViewGroup content = a.findViewById(android.R.id.content);
+    /** Builds the panel (also used by screenshot tests). */
+    public static FrameLayout buildPanel(Activity a, List<Item> items, int topPx, Runnable onClose) {
+        int m = YugiTheme.dp(a, 12);
         FrameLayout scrim = new FrameLayout(a);
-        scrim.setBackgroundColor(0x55000000);
+        scrim.setBackgroundColor(0x4D000000);
         scrim.setClickable(true);
 
         LinearLayout panel = new LinearLayout(a);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        panel.setPadding(dp(a, 12), dp(a, 24), dp(a, 12), dp(a, 24));
-        GradientDrawable pbg = new GradientDrawable();
-        pbg.setColor(0xF0111827);
-        pbg.setCornerRadius(dp(a, 16));
-        panel.setBackground(pbg);
+        panel.setPadding(YugiTheme.dp(a, 6), YugiTheme.dp(a, 8), YugiTheme.dp(a, 6), YugiTheme.dp(a, 8));
 
-        Runnable close = () -> panel.animate().translationX(dp(a, 280)).alpha(0f).setDuration(150)
-                .withEndAction(() -> content.removeView(scrim)).start();
+        ScrollView sv = new ScrollView(a);
+        sv.setBackground(YugiTheme.roundedStroke(a, YugiTheme.GLASS_STRONG, YugiTheme.RADIUS_L, YugiTheme.STROKE));
+        sv.setElevation(YugiTheme.dp(a, 12));
+        sv.setClickable(true);
+        sv.addView(panel);
+
+        Runnable close = () -> sv.animate().alpha(0f).setDuration(120).withEndAction(() -> {
+            ViewGroup p = (ViewGroup) scrim.getParent();
+            if (p != null) p.removeView(scrim);
+            onClose.run();
+        }).start();
 
         for (Item it : items) {
-            TextView t = new TextView(a);
-            t.setText(it.label);
-            t.setTextColor(it.current ? 0xFF7FA8FF : Color.WHITE);
-            t.setTypeface(it.current ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
-            t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
-            t.setMinHeight(dp(a, 52));
+            if (it.section) {
+                TextView h = YugiTheme.text(a, it.label, 12, 500, YugiTheme.TEXT_FAINT);
+                h.setPadding(YugiTheme.dp(a, 14), YugiTheme.dp(a, 12), YugiTheme.dp(a, 14), YugiTheme.dp(a, 4));
+                panel.addView(h);
+                continue;
+            }
+            TextView t = YugiTheme.text(a, it.label, 15, it.current ? 600 : 400, it.current ? YugiTheme.ACCENT : YugiTheme.TEXT);
+            t.setMinHeight(YugiTheme.dp(a, 48));
             t.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-            t.setPadding(dp(a, 16), 0, dp(a, 16), 0);
-            t.setOnClickListener(v -> {
-                close.run();
-                if (it.action != null) it.action.run();
-            });
+            t.setPadding(YugiTheme.dp(a, 14), 0, YugiTheme.dp(a, 14), 0);
+            t.setBackground(YugiTheme.rounded(a, it.current ? YugiTheme.SURFACE : 0x00000000, YugiTheme.RADIUS_S));
+            if (!it.current) {
+                t.setOnClickListener(v -> {
+                    close.run();
+                    if (it.action != null) it.action.run();
+                });
+            }
             panel.addView(t, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         }
 
-        FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(dp(a, 240),
-                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.END | Gravity.CENTER_VERTICAL);
-        plp.rightMargin = dp(a, 12);
-        scrim.addView(panel, plp);
+        FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(YugiTheme.dp(a, 280),
+                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.END | Gravity.TOP);
+        plp.rightMargin = m;
+        plp.leftMargin = m;
+        plp.topMargin = Math.max(m, topPx);
+        plp.bottomMargin = m;
+        scrim.addView(sv, plp);
         scrim.setOnClickListener(v -> close.run());
-        panel.setClickable(true);
-        content.addView(scrim, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        panel.setTranslationX(dp(a, 280));
-        panel.setAlpha(0f);
-        panel.animate().translationX(0).alpha(1f).setDuration(180).start();
+        sv.setAlpha(0f);
+        sv.animate().alpha(1f).setDuration(140).start();
+        return scrim;
     }
 }

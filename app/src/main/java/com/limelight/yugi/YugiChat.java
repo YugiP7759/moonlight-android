@@ -5,43 +5,60 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.database.Cursor;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
-import android.graphics.Typeface;
+import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
 import android.media.MediaRecorder;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.OpenableColumns;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.speech.tts.TextToSpeech;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
+import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
 import com.limelight.BuildConfig;
 import com.limelight.LimeLog;
+import com.limelight.R;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
@@ -54,26 +71,53 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 
 /**
- * "יוגי": floating button + semi-transparent side panel to chat with Yugi (Claude Code on the server,
- * via yugi-chat-bridge on port 8899). Text and voice; the stream keeps running underneath.
+ * "יוגי" chat panel (Claude Code on the server via yugi-chat-bridge :8899).
+ * A full-screen, touch-transparent container holding one glass card at the end side. The card always sits
+ * below the toolbar and above the keyboard (IME insets), so the input field is never hidden.
+ * Text, Hebrew voice, screenshot of the current stream and file attachments.
  */
-public final class YugiChat {
+public class YugiChat extends FrameLayout {
     public static final int PORT = 8899;
+    public static final int MAX_ATTACH_BYTES = 20 * 1024 * 1024;
 
-    // ---- process-wide conversation model (survives switching between PC and games) ----
+    /** What the hosting screen provides. */
+    public interface Host {
+        /** Grab the current frame (desktop stream or game), or null. Called on the UI thread. */
+        void captureScreen(BitmapCallback cb);
+        /** Open the file picker (normally {@link #openPicker(Activity)}). */
+        void pickFile();
+        /** Top edge (px) the panel must stay below (the toolbar). */
+        int reservedTop();
+    }
+
+    public interface BitmapCallback { void onBitmap(Bitmap b); }
+
+    // ---- shared conversation model (survives switching between PC and games) ----
+    static final class Attachment {
+        final String name;
+        final String mime;
+        final byte[] data;
+        final Bitmap thumb; // images only
+        String serverPath;
+        Attachment(String name, String mime, byte[] data, Bitmap thumb) {
+            this.name = name; this.mime = mime; this.data = data; this.thumb = thumb;
+        }
+    }
+
     static final class Msg {
         final String role; // user | assistant | system
         final StringBuilder text;
+        final List<Attachment> attachments = new ArrayList<>();
         Msg(String role, String text) { this.role = role; this.text = new StringBuilder(text); }
     }
 
     private static final List<Msg> messages = new ArrayList<>();
     private static boolean historyLoaded;
-    private static volatile Call activeCall;
     private static volatile boolean busy;
     private static final OkHttpClient http = new OkHttpClient.Builder()
             .connectTimeout(8, TimeUnit.SECONDS)
             .readTimeout(0, TimeUnit.MILLISECONDS) // SSE
+            .writeTimeout(60, TimeUnit.SECONDS)
             .build();
 
     public static boolean isEnabled() {
@@ -87,15 +131,27 @@ public final class YugiChat {
                 .header("Authorization", "Bearer " + BuildConfig.YUGI_CHAT_TOKEN);
     }
 
-    // ---- per-activity UI ----
-    private final Activity a;
+    // ---- view ----
+    private final Host host;
     private final Handler ui = new Handler(Looper.getMainLooper());
-    private FrameLayout panel;
-    private LinearLayout list;
-    private ScrollView scroll;
-    private EditText input;
-    private TextView micBtn, stopBtn, statusView;
+    private final LinearLayout card;
+    private final LinearLayout list;
+    private final ScrollView scroll;
+    private final EditText input;
+    private final ImageButton micSend;
+    private final ImageButton stopBtn;
+    private final TextView subtitle;
+    private final LinearLayout attachRow;
+    private final HorizontalScrollView attachScroll;
+    private final LinearLayout inputBox;
+    // Attachments waiting to be sent (shared: the file picker may outlive the hosting screen)
+    private static final List<Attachment> pending = new ArrayList<>();
+    /** Set by the file picker: reopen the panel on the next screen that attaches it. */
+    static volatile boolean reopenOnAttach;
+    private static YugiChat current;
     private boolean open;
+    private int imeInset;
+    private int navInset;
     private TextView liveBubble;
     private TextToSpeech tts;
     private boolean ttsReady;
@@ -104,168 +160,248 @@ public final class YugiChat {
     private MediaRecorder recorder;
     private File recordFile;
     private boolean micWasOn;
+    private boolean sendMode;
 
-    private YugiChat(Activity a) { this.a = a; }
+    private int dp(float v) { return YugiTheme.dp(getContext(), v); }
 
-    private int dp(float v) {
-        return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, a.getResources().getDisplayMetrics());
-    }
+    public YugiChat(Context ctx, Host host) {
+        super(ctx);
+        this.host = host;
+        setClickable(false);
+        setFocusable(false);
+        setVisibility(GONE);
 
-    /** Adds the floating "יוגי" button (under the menu button). Returns the controller, or null if disabled. */
-    public static YugiChat attach(Activity a) {
-        if (!isEnabled()) return null;
-        YugiChat c = new YugiChat(a);
-        c.build();
-        return c;
-    }
+        card = new LinearLayout(ctx);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setLayoutDirection(LAYOUT_DIRECTION_RTL);
+        card.setBackground(YugiTheme.roundedStroke(ctx, YugiTheme.GLASS_STRONG, YugiTheme.RADIUS_L, YugiTheme.STROKE));
+        card.setElevation(dp(12));
+        card.setClickable(true); // touches on the card never reach the stream
+        card.setPadding(dp(8), dp(8), dp(8), dp(8));
+        addView(card);
 
-    private void build() {
-        TextView b = new TextView(a);
-        b.setText("יוגי");
-        b.setTextColor(Color.WHITE);
-        b.setTypeface(Typeface.DEFAULT_BOLD);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        b.setGravity(Gravity.CENTER);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setShape(GradientDrawable.OVAL);
-        bg.setColor(0x993D7BFF);
-        b.setBackground(bg);
-        b.setAlpha(0.6f);
-        b.setContentDescription("צ'אט עם יוגי");
-        FrameLayout.LayoutParams blp = new FrameLayout.LayoutParams(dp(44), dp(44), Gravity.TOP | Gravity.END);
-        blp.topMargin = dp(64);
-        blp.rightMargin = dp(12);
-        b.setOnClickListener(v -> toggle());
-        a.addContentView(b, blp);
-
-        panel = new FrameLayout(a);
-        panel.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        GradientDrawable pbg = new GradientDrawable();
-        pbg.setColor(0xCC0B1220);
-        pbg.setCornerRadius(dp(16));
-        panel.setBackground(pbg);
-        panel.setClickable(true); // touches on the panel never reach the stream
-        panel.setVisibility(View.GONE);
-
-        LinearLayout col = new LinearLayout(a);
-        col.setOrientation(LinearLayout.VERTICAL);
-        col.setPadding(dp(10), dp(10), dp(10), dp(10));
-        panel.addView(col, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-        // header
-        LinearLayout head = new LinearLayout(a);
+        // ---- header ----
+        LinearLayout head = new LinearLayout(ctx);
         head.setOrientation(LinearLayout.HORIZONTAL);
         head.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = label("יוגי", 17, true);
-        head.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        stopBtn = chip("עצור", v -> stop());
-        stopBtn.setVisibility(View.GONE);
-        head.addView(stopBtn);
-        head.addView(chip("שיחה חדשה", v -> reset()));
-        head.addView(chip("✕", v -> toggle()));
-        col.addView(head);
+        head.setPadding(dp(4), 0, 0, 0);
+        ImageView avatar = new ImageView(ctx);
+        avatar.setImageResource(R.drawable.yugi_ic_yugi);
+        avatar.setImageTintList(android.content.res.ColorStateList.valueOf(YugiTheme.ACCENT));
+        avatar.setScaleType(ImageView.ScaleType.CENTER);
+        GradientDrawable av = new GradientDrawable();
+        av.setShape(GradientDrawable.OVAL);
+        av.setColor(YugiTheme.SURFACE);
+        avatar.setBackground(av);
+        head.addView(avatar, new LinearLayout.LayoutParams(dp(36), dp(36)));
+        LinearLayout titles = new LinearLayout(ctx);
+        titles.setOrientation(LinearLayout.VERTICAL);
+        titles.setPadding(dp(10), 0, dp(10), 0);
+        titles.addView(YugiTheme.text(ctx, "יוגי", 16, 600, YugiTheme.TEXT));
+        subtitle = YugiTheme.text(ctx, "העוזר שלך במחשב", 12, 400, YugiTheme.TEXT_DIM);
+        subtitle.setPadding(0, dp(2), 0, 0);
+        titles.addView(subtitle);
+        head.addView(titles, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        stopBtn = YugiTheme.iconButton(ctx, R.drawable.yugi_ic_stop, "עצור");
+        stopBtn.setOnClickListener(v -> stop());
+        stopBtn.setVisibility(GONE);
+        head.addView(stopBtn, sq(48));
+        ImageButton newChat = YugiTheme.iconButton(ctx, R.drawable.yugi_ic_add, "שיחה חדשה");
+        newChat.setOnClickListener(v -> reset());
+        head.addView(newChat, sq(48));
+        ImageButton close = YugiTheme.iconButton(ctx, R.drawable.yugi_ic_close, "סגור");
+        close.setOnClickListener(v -> setOpen(false));
+        head.addView(close, sq(48));
+        card.addView(head);
 
-        statusView = label("", 12, false);
-        statusView.setTextColor(0xFF9DB4FF);
-        statusView.setVisibility(View.GONE);
-        col.addView(statusView);
+        View hair = new View(ctx);
+        hair.setBackgroundColor(YugiTheme.STROKE);
+        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, dp(1)));
+        hlp.topMargin = dp(6);
+        card.addView(hair, hlp);
 
-        scroll = new ScrollView(a);
-        list = new LinearLayout(a);
+        // ---- messages ----
+        scroll = new ScrollView(ctx);
+        scroll.setFillViewport(true);
+        scroll.setVerticalScrollBarEnabled(false);
+        list = new LinearLayout(ctx);
         list.setOrientation(LinearLayout.VERTICAL);
+        list.setPadding(dp(4), dp(8), dp(4), dp(8));
         scroll.addView(list);
-        col.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        card.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
 
-        // input row
-        LinearLayout row = new LinearLayout(a);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        input = new EditText(a);
-        input.setHint("כתוב ליוגי…");
-        input.setHintTextColor(0x99FFFFFF);
-        input.setTextColor(Color.WHITE);
+        // ---- attachment preview ----
+        attachRow = new LinearLayout(ctx);
+        attachRow.setOrientation(LinearLayout.HORIZONTAL);
+        attachRow.setPadding(dp(4), 0, dp(4), dp(6));
+        attachScroll = new HorizontalScrollView(ctx);
+        attachScroll.setHorizontalScrollBarEnabled(false);
+        attachScroll.addView(attachRow);
+        attachScroll.setVisibility(GONE);
+        card.addView(attachScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // ---- input ----
+        inputBox = new LinearLayout(ctx);
+        inputBox.setOrientation(LinearLayout.HORIZONTAL);
+        inputBox.setGravity(Gravity.CENTER_VERTICAL);
+        inputBox.setBackground(YugiTheme.roundedStroke(ctx, YugiTheme.SURFACE, 24, YugiTheme.STROKE));
+        inputBox.setMinimumHeight(dp(56));
+        inputBox.setPadding(dp(4), dp(4), dp(4), dp(4));
+        ImageButton attach = YugiTheme.iconButton(ctx, R.drawable.yugi_ic_attach, "צרף קובץ");
+        attach.setOnClickListener(v -> { reopenOnAttach = true; host.pickFile(); });
+        inputBox.addView(attach, sq(48));
+        ImageButton shot = YugiTheme.iconButton(ctx, R.drawable.yugi_ic_screenshot, "צלם מסך");
+        shot.setOnClickListener(v -> takeScreenshot());
+        inputBox.addView(shot, sq(48));
+        input = new EditText(ctx);
+        input.setHint("הודעה ליוגי");
+        input.setHintTextColor(YugiTheme.TEXT_FAINT);
+        input.setTextColor(YugiTheme.TEXT);
+        input.setTypeface(YugiTheme.font(ctx, 400));
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        input.setBackground(null);
+        input.setPadding(dp(8), dp(10), dp(8), dp(10));
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-        input.setMaxLines(4);
-        input.setImeOptions(EditorInfo.IME_ACTION_SEND);
+        input.setMaxLines(5);
+        input.setImeOptions(EditorInfo.IME_ACTION_SEND | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
+        input.setTextDirection(TEXT_DIRECTION_FIRST_STRONG);
         input.setOnEditorActionListener((v, id, ev) -> {
-            if (id == EditorInfo.IME_ACTION_SEND || (ev != null && ev.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
+            if (id == EditorInfo.IME_ACTION_SEND || (ev != null && ev.getKeyCode() == KeyEvent.KEYCODE_ENTER
+                    && ev.getAction() == KeyEvent.ACTION_DOWN)) {
                 sendTyped();
                 return true;
             }
             return false;
         });
-        row.addView(input, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        micBtn = roundButton("🎤", v -> onMic());
-        row.addView(micBtn, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        TextView send = roundButton("➤", v -> sendTyped());
-        send.setRotation(180); // points left in RTL
-        row.addView(send, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        col.addView(row);
+        input.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void afterTextChanged(Editable s) { updateSendButton(); }
+        });
+        inputBox.addView(input, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        micSend = YugiTheme.iconButton(ctx, R.drawable.yugi_ic_mic, "הקלטה");
+        micSend.setOnClickListener(v -> { if (sendMode) sendTyped(); else onMic(); });
+        inputBox.addView(micSend, sq(48));
+        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        ilp.topMargin = dp(4);
+        card.addView(inputBox, ilp);
+        updateSendButton();
 
-        int width = Math.min(dp(380), (int) (a.getResources().getDisplayMetrics().widthPixels * 0.5f));
-        width = Math.max(width, Math.min(dp(300), a.getResources().getDisplayMetrics().widthPixels - dp(24)));
-        FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(width, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END);
-        plp.topMargin = dp(12);
-        plp.bottomMargin = dp(12);
-        plp.rightMargin = dp(64);
-        a.addContentView(panel, plp);
+        // Keep the card above the keyboard and system bars
+        setOnApplyWindowInsetsListener((v, insets) -> {
+            int ime = 0, nav = 0;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                ime = insets.getInsets(WindowInsets.Type.ime()).bottom;
+                nav = insets.getInsets(WindowInsets.Type.systemBars()).bottom;
+            } else {
+                ime = insets.getSystemWindowInsetBottom();
+            }
+            setInsets(ime, nav);
+            return insets;
+        });
 
         renderAll();
     }
 
-    private TextView label(String t, int sp, boolean bold) {
-        TextView v = new TextView(a);
-        v.setText(t);
-        v.setTextColor(Color.WHITE);
-        v.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
-        if (bold) v.setTypeface(Typeface.DEFAULT_BOLD);
-        return v;
+    private LinearLayout.LayoutParams sq(int sizeDp) {
+        return new LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp));
     }
 
-    private TextView chip(String t, View.OnClickListener l) {
-        TextView v = label(t, 13, false);
-        v.setPadding(dp(10), dp(8), dp(10), dp(8));
-        v.setMinHeight(dp(40));
-        v.setGravity(Gravity.CENTER);
-        v.setOnClickListener(l);
-        return v;
+    /** Adds the (hidden) panel over an activity. */
+    public static YugiChat attach(Activity a, Host host) {
+        if (!isEnabled()) return null;
+        YugiChat c = new YugiChat(a, host);
+        a.addContentView(c, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        current = c;
+        c.renderPending();
+        if (reopenOnAttach) {
+            reopenOnAttach = false;
+            c.post(() -> c.setOpen(true));
+        }
+        return c;
     }
 
-    private TextView roundButton(String t, View.OnClickListener l) {
-        TextView v = label(t, 18, false);
-        v.setGravity(Gravity.CENTER);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setShape(GradientDrawable.OVAL);
-        bg.setColor(0x553D7BFF);
-        v.setBackground(bg);
-        v.setOnClickListener(l);
-        return v;
+    /** Opens the shared file picker screen (works from the stream too, which can't host a picker). */
+    public static void openPicker(Activity from) {
+        from.startActivity(new Intent(from, YugiPickActivity.class));
+    }
+
+    // ---------------------------------------------------------------- layout
+
+    /** Keyboard (IME) and navigation-bar insets in px. */
+    public void setInsets(int ime, int nav) {
+        if (ime != imeInset || nav != navInset) {
+            imeInset = ime;
+            navInset = nav;
+            requestLayout();
+            if (open) scrollToEnd();
+        }
+    }
+
+    @Override
+    protected void onMeasure(int wSpec, int hSpec) {
+        int w = MeasureSpec.getSize(wSpec), h = MeasureSpec.getSize(hSpec);
+        setMeasuredDimension(w, h);
+        Rect r = cardRect(w, h);
+        card.measure(MeasureSpec.makeMeasureSpec(r.width(), MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(r.height(), MeasureSpec.EXACTLY));
+    }
+
+    @Override
+    protected void onLayout(boolean changed, int l, int t, int r, int b) {
+        Rect c = cardRect(r - l, b - t);
+        card.layout(c.left, c.top, c.right, c.bottom);
+    }
+
+    /** Where the card goes: end side, below the toolbar, above the keyboard. */
+    Rect cardRect(int w, int h) {
+        int m = dp(12);
+        int top = Math.max(m, host != null ? host.reservedTop() : m);
+        int bottom = h - Math.max(m, Math.max(imeInset, navInset) + m);
+        int width = w >= dp(600) ? Math.min(dp(420), (int) (w * 0.46f)) : w - 2 * m;
+        boolean rtl = getLayoutDirection() == LAYOUT_DIRECTION_RTL;
+        int left = rtl ? m : w - m - width;
+        // Very little room above the keyboard: use it all, the input row stays visible
+        if (bottom - top < dp(160)) top = Math.max(m, bottom - dp(160));
+        return new Rect(left, top, left + width, bottom);
+    }
+
+    /** Input field position (screen coordinates within this view), for checks. */
+    public Rect inputRect() {
+        return new Rect(card.getLeft() + inputBox.getLeft(), card.getTop() + inputBox.getTop(),
+                card.getLeft() + inputBox.getRight(), card.getTop() + inputBox.getBottom());
+    }
+
+    public Rect cardRect() {
+        return new Rect(card.getLeft(), card.getTop(), card.getRight(), card.getBottom());
     }
 
     // ---------------------------------------------------------------- open / close
 
-    public void toggle() {
-        open = !open;
-        if (open) {
-            panel.setVisibility(View.VISIBLE);
-            panel.setAlpha(0f);
-            panel.setTranslationX(dp(60));
-            panel.animate().alpha(1f).translationX(0).setDuration(160).start();
+    public boolean isOpen() { return open; }
+
+    public void toggle() { setOpen(!open); }
+
+    public void setOpen(boolean o) {
+        open = o;
+        if (o) {
+            setVisibility(VISIBLE);
+            card.setAlpha(0f);
+            card.setTranslationX(dp(24) * (getLayoutDirection() == LAYOUT_DIRECTION_RTL ? -1 : 1));
+            card.animate().alpha(1f).translationX(0).setDuration(160).start();
             if (!historyLoaded) loadHistory();
             scrollToEnd();
+            requestApplyInsets();
         } else {
             hideKeyboard();
             stopListening();
             if (tts != null) tts.stop();
-            panel.animate().alpha(0f).translationX(dp(60)).setDuration(140)
-                    .withEndAction(() -> panel.setVisibility(View.GONE)).start();
+            card.animate().alpha(0f).setDuration(120).withEndAction(() -> setVisibility(GONE)).start();
         }
     }
 
-    public boolean isOpen() { return open; }
-
     private void hideKeyboard() {
-        InputMethodManager imm = (InputMethodManager) a.getSystemService(Context.INPUT_METHOD_SERVICE);
+        InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
         if (imm != null) imm.hideSoftInputFromWindow(input.getWindowToken(), 0);
         input.clearFocus();
     }
@@ -276,6 +412,12 @@ public final class YugiChat {
         list.removeAllViews();
         liveBubble = null;
         synchronized (messages) {
+            if (messages.isEmpty()) {
+                TextView empty = YugiTheme.text(getContext(), "מה תרצה שאעשה?", 15, 400, YugiTheme.TEXT_DIM);
+                empty.setGravity(Gravity.CENTER);
+                empty.setPadding(0, dp(24), 0, dp(24));
+                list.addView(empty, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            }
             for (Msg m : messages) addBubble(m);
         }
         refreshBusy();
@@ -283,33 +425,112 @@ public final class YugiChat {
     }
 
     private TextView addBubble(Msg m) {
-        TextView t = new TextView(a);
-        t.setText(m.text);
+        Context c = getContext();
+        LinearLayout wrap = new LinearLayout(c);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams wlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        wlp.topMargin = dp(10);
+
+        TextView t = YugiTheme.text(c, m.text.toString(), 15, 400, YugiTheme.TEXT);
+        t.setLineSpacing(dp(3), 1f);
         t.setTextIsSelectable(true);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        t.setPadding(dp(12), dp(8), dp(12), dp(8));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(12));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = dp(6);
+        t.setTextDirection(TEXT_DIRECTION_FIRST_STRONG);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         if ("user".equals(m.role)) {
-            bg.setColor(0xCC3D7BFF);
-            t.setTextColor(Color.WHITE);
-            lp.gravity = Gravity.START; // RTL: user on the right
+            wrap.setGravity(Gravity.START); // RTL: Yagel's messages on the right
+            t.setBackground(YugiTheme.rounded(c, YugiTheme.SURFACE_HI, YugiTheme.RADIUS_M));
+            t.setPadding(dp(14), dp(10), dp(14), dp(10));
+            t.setMaxWidth(dp(300));
+            for (Attachment a : m.attachments) wrap.addView(attachmentChip(a, false));
+            if (m.text.length() == 0) t.setVisibility(GONE);
         } else if ("system".equals(m.role)) {
-            bg.setColor(0x00000000);
-            t.setTextColor(0x99FFFFFF);
+            wrap.setGravity(Gravity.CENTER_HORIZONTAL);
+            t.setTextColor(YugiTheme.TEXT_FAINT);
             t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            lp.gravity = Gravity.CENTER_HORIZONTAL;
         } else {
-            bg.setColor(0xCC1F2937);
-            t.setTextColor(Color.WHITE);
-            lp.gravity = Gravity.END;
+            wrap.setGravity(Gravity.START);
+            t.setPadding(dp(4), dp(2), dp(4), dp(2));
+            tlp.width = ViewGroup.LayoutParams.MATCH_PARENT;
         }
-        t.setBackground(bg);
-        t.setMaxWidth(dp(320));
-        list.addView(t, lp);
+        wrap.addView(t, tlp);
+        list.addView(wrap, wlp);
         return t;
+    }
+
+    /** Thumbnail (image) or file chip; with a remove button in the preview row. */
+    private View attachmentChip(Attachment a, boolean removable) {
+        Context c = getContext();
+        FrameLayout f = new FrameLayout(c);
+        View body;
+        if (a.thumb != null) {
+            ImageView iv = new ImageView(c);
+            iv.setImageBitmap(a.thumb);
+            iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            iv.setClipToOutline(true);
+            iv.setBackground(YugiTheme.rounded(c, YugiTheme.SURFACE, YugiTheme.RADIUS_S));
+            body = iv;
+            f.addView(iv, new LayoutParams(dp(removable ? 64 : 160), dp(removable ? 64 : 100)));
+        } else {
+            LinearLayout chip = new LinearLayout(c);
+            chip.setOrientation(LinearLayout.HORIZONTAL);
+            chip.setGravity(Gravity.CENTER_VERTICAL);
+            chip.setBackground(YugiTheme.roundedStroke(c, YugiTheme.SURFACE, YugiTheme.RADIUS_S, YugiTheme.STROKE));
+            chip.setPadding(dp(10), 0, dp(12), 0);
+            ImageView ic = new ImageView(c);
+            ic.setImageResource(R.drawable.yugi_ic_file);
+            ic.setImageTintList(android.content.res.ColorStateList.valueOf(YugiTheme.TEXT_DIM));
+            chip.addView(ic, new LinearLayout.LayoutParams(dp(20), dp(20)));
+            TextView name = YugiTheme.text(c, a.name, 13, 400, YugiTheme.TEXT);
+            name.setPadding(dp(8), 0, 0, 0);
+            name.setSingleLine(true);
+            name.setMaxWidth(dp(160));
+            name.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+            chip.addView(name);
+            body = chip;
+            f.addView(chip, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(removable ? 64 : 44)));
+        }
+        if (removable) {
+            ImageButton x = YugiTheme.iconButton(c, R.drawable.yugi_ic_close, "הסר");
+            x.setScaleX(0.75f);
+            x.setScaleY(0.75f);
+            GradientDrawable xb = new GradientDrawable();
+            xb.setShape(GradientDrawable.OVAL);
+            xb.setColor(0xCC000000);
+            x.setBackground(xb);
+            x.setOnClickListener(v -> { pending.remove(a); renderPending(); });
+            LayoutParams xlp = new LayoutParams(dp(48), dp(48), Gravity.TOP | Gravity.END);
+            f.addView(x, xlp);
+            f.setPadding(0, 0, 0, 0);
+        }
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = dp(6);
+        lp.leftMargin = dp(6);
+        f.setLayoutParams(lp);
+        return f;
+    }
+
+    private void renderPending() {
+        attachRow.removeAllViews();
+        for (Attachment a : pending) attachRow.addView(attachmentChip(a, true));
+        attachScroll.setVisibility(pending.isEmpty() ? GONE : VISIBLE);
+        updateSendButton();
+    }
+
+    private void updateSendButton() {
+        boolean canSend = input.getText().toString().trim().length() > 0 || !pending.isEmpty();
+        sendMode = canSend;
+        micSend.setImageResource(canSend ? R.drawable.yugi_ic_send : R.drawable.yugi_ic_mic);
+        micSend.setContentDescription(canSend ? "שלח" : "הקלטה");
+        micSend.setRotation(canSend ? 180 : 0); // send arrow points left in RTL
+        if (canSend) {
+            GradientDrawable g = new GradientDrawable();
+            g.setShape(GradientDrawable.OVAL);
+            g.setColor(YugiTheme.TEXT);
+            micSend.setBackground(g);
+            micSend.setImageTintList(android.content.res.ColorStateList.valueOf(0xFF0B0E14));
+        } else {
+            YugiTheme.setActive(micSend, false);
+        }
     }
 
     private void scrollToEnd() {
@@ -317,14 +538,94 @@ public final class YugiChat {
     }
 
     private void refreshBusy() {
-        stopBtn.setVisibility(busy ? View.VISIBLE : View.GONE);
-        if (!busy) statusView.setVisibility(View.GONE);
+        stopBtn.setVisibility(busy ? VISIBLE : GONE);
+        if (!busy) subtitle.setText("העוזר שלך במחשב");
     }
 
     private void setStatus(String s) {
-        statusView.setText(s);
-        statusView.setVisibility(s == null || s.isEmpty() ? View.GONE : View.VISIBLE);
+        subtitle.setText(s == null || s.isEmpty() ? "העוזר שלך במחשב" : s);
     }
+
+    // ---------------------------------------------------------------- attachments
+
+    private void takeScreenshot() {
+        // Capture without the panel on top
+        card.setVisibility(INVISIBLE);
+        ui.postDelayed(() -> host.captureScreen(bmp -> {
+            card.setVisibility(VISIBLE);
+            if (bmp == null) { setStatus("לא הצלחתי לצלם את המסך"); return; }
+            Bitmap scaled = scaleDown(bmp, 1920);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            scaled.compress(Bitmap.CompressFormat.JPEG, 85, out);
+            String name = "screenshot-" + new SimpleDateFormat("HHmmss", Locale.US).format(new Date()) + ".jpg";
+            pending.add(new Attachment(name, "image/jpeg", out.toByteArray(), scaleDown(scaled, 320)));
+            renderPending();
+        }), 60);
+    }
+
+    private static Bitmap scaleDown(Bitmap b, int maxSide) {
+        int w = b.getWidth(), h = b.getHeight();
+        float s = Math.min(1f, (float) maxSide / Math.max(w, h));
+        if (s >= 1f) return b;
+        return Bitmap.createScaledBitmap(b, Math.max(1, Math.round(w * s)), Math.max(1, Math.round(h * s)), true);
+    }
+
+    /** Reads a picked file into the shared pending list (runs off the UI thread). */
+    static void importUri(Context c, Uri uri, Runnable done) {
+        new Thread(() -> {
+            try {
+                String name = "file";
+                try (Cursor cur = c.getContentResolver().query(uri, null, null, null, null)) {
+                    if (cur != null && cur.moveToFirst()) {
+                        int i = cur.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                        if (i >= 0) name = cur.getString(i);
+                    }
+                }
+                String mime = c.getContentResolver().getType(uri);
+                if (mime == null) mime = "application/octet-stream";
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                try (InputStream in = c.getContentResolver().openInputStream(uri)) {
+                    byte[] buf = new byte[64 * 1024];
+                    int n;
+                    while (in != null && (n = in.read(buf)) > 0) {
+                        out.write(buf, 0, n);
+                        if (out.size() > MAX_ATTACH_BYTES) throw new Exception("too big");
+                    }
+                }
+                byte[] data = out.toByteArray();
+                Bitmap thumb = null;
+                if (mime.startsWith("image/")) {
+                    Bitmap full = BitmapFactory.decodeByteArray(data, 0, data.length);
+                    if (full != null) thumb = scaleDown(full, 320);
+                }
+                Attachment a = new Attachment(name, mime, data, thumb);
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    pending.add(a);
+                    if (current != null) current.renderPending();
+                    if (done != null) done.run();
+                });
+            } catch (Exception e) {
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    if (current != null) current.setStatus("לא הצלחתי לצרף (עד 20MB)");
+                    if (done != null) done.run();
+                });
+            }
+        }, "YugiAttach").start();
+    }
+
+    /** For previews/tests: add an attachment directly. */
+    void addPendingForTest(String name, String mime, byte[] data, Bitmap thumb) {
+        pending.add(new Attachment(name, mime, data, thumb));
+        renderPending();
+    }
+
+    /** For previews/tests: replace the conversation. */
+    static void setMessagesForTest(List<Msg> ms) {
+        synchronized (messages) { messages.clear(); messages.addAll(ms); }
+        historyLoaded = true;
+    }
+
+    void rerenderForTest() { renderAll(); }
 
     // ---------------------------------------------------------------- network
 
@@ -340,7 +641,7 @@ public final class YugiChat {
                     List<Msg> loaded = new ArrayList<>();
                     for (int i = 0; i < items.length(); i++) {
                         JSONObject o = items.getJSONObject(i);
-                        loaded.add(new Msg(o.optString("role"), o.optString("text")));
+                        loaded.add(new Msg(o.optString("role"), o.optString("display", o.optString("text"))));
                     }
                     synchronized (messages) {
                         if (messages.isEmpty()) messages.addAll(loaded);
@@ -355,7 +656,7 @@ public final class YugiChat {
 
     private void sendTyped() {
         String t = input.getText().toString().trim();
-        if (t.isEmpty()) return;
+        if (t.isEmpty() && pending.isEmpty()) return;
         input.setText("");
         speakNext = false;
         send(t);
@@ -368,26 +669,62 @@ public final class YugiChat {
         }
         busy = true;
         Msg user = new Msg("user", text);
+        user.attachments.addAll(pending);
+        pending.clear();
+        renderPending();
         Msg answer = new Msg("assistant", "");
-        synchronized (messages) { messages.add(user); messages.add(answer); }
+        synchronized (messages) {
+            if (messages.isEmpty()) list.removeAllViews();
+            messages.add(user);
+            messages.add(answer);
+        }
         addBubble(user);
         liveBubble = addBubble(answer);
         liveBubble.setText("…");
         refreshBusy();
-        setStatus("חושב…");
+        setStatus(user.attachments.isEmpty() ? "חושב…" : "מעלה קבצים…");
         scrollToEnd();
+        new Thread(() -> {
+            String err = uploadAll(user.attachments);
+            if (err != null) {
+                finish(answer, err);
+                return;
+            }
+            StringBuilder prompt = new StringBuilder(text);
+            if (!user.attachments.isEmpty()) {
+                prompt.append(prompt.length() > 0 ? "\n\n" : "").append("קבצים מצורפים מיגל (קרא אותם):");
+                for (Attachment a : user.attachments) prompt.append("\n- ").append(a.serverPath);
+            }
+            ui.post(() -> setStatus("חושב…"));
+            runStream(prompt.toString(), text, answer);
+        }, "YugiChat").start();
+    }
 
+    /** Uploads attachments; returns an error message or null. */
+    private String uploadAll(List<Attachment> atts) {
+        for (Attachment a : atts) {
+            if (a.serverPath != null) continue;
+            try {
+                Request r = req("/upload?name=" + URLEncoder.encode(a.name, "UTF-8"))
+                        .post(RequestBody.create(a.data, MediaType.get(a.mime))).build();
+                try (Response res = http.newCall(r).execute()) {
+                    if (!res.isSuccessful() || res.body() == null) return "העלאת הקובץ נכשלה (" + res.code() + ")";
+                    a.serverPath = new JSONObject(res.body().string()).getString("path");
+                }
+            } catch (Exception e) {
+                return "העלאת הקובץ נכשלה";
+            }
+        }
+        return null;
+    }
+
+    private void runStream(String prompt, String display, Msg answer) {
+        String error = null;
         JSONObject body = new JSONObject();
-        try { body.put("text", text); } catch (Exception ignored) {}
+        try { body.put("text", prompt); body.put("display", display); } catch (Exception ignored) {}
         Call call = http.newCall(req("/chat")
                 .post(RequestBody.create(body.toString().getBytes(StandardCharsets.UTF_8), MediaType.get("application/json")))
                 .build());
-        activeCall = call;
-        new Thread(() -> runStream(call, answer), "YugiChat").start();
-    }
-
-    private void runStream(Call call, Msg answer) {
-        String error = null;
         try (Response res = call.execute()) {
             if (res.code() == 409) {
                 error = "יוגי עסוק בבקשה אחרת. נסה שוב בעוד רגע";
@@ -401,20 +738,19 @@ public final class YugiChat {
                         event = line.substring(6).trim();
                     } else if (line.startsWith("data:") && event != null) {
                         JSONObject d = new JSONObject(line.substring(5).trim());
-                        final String ev = event;
-                        if ("delta".equals(ev)) {
+                        if ("delta".equals(event)) {
                             String piece = d.optString("text");
                             synchronized (messages) { answer.text.append(piece); }
                             ui.post(() -> { if (liveBubble != null) liveBubble.setText(answer.text); scrollToEnd(); });
-                        } else if ("status".equals(ev)) {
+                        } else if ("status".equals(event)) {
                             String tool = d.optString("tool", "");
-                            ui.post(() -> setStatus(tool.isEmpty() ? "חושב…" : "עובד (" + tool + ")…"));
-                        } else if ("done".equals(ev)) {
+                            ui.post(() -> setStatus(tool.isEmpty() ? "חושב…" : "עובד…"));
+                        } else if ("done".equals(event)) {
                             String full = d.optString("text");
                             synchronized (messages) {
                                 if (!full.isEmpty()) { answer.text.setLength(0); answer.text.append(full); }
                             }
-                        } else if ("error".equals(ev)) {
+                        } else if ("error".equals(event)) {
                             String err = d.optString("error");
                             error = "stopped".equals(err) ? "נעצר" : "שגיאה: " + err;
                         }
@@ -422,13 +758,15 @@ public final class YugiChat {
                 }
             }
         } catch (Exception e) {
-            if (!call.isCanceled()) error = "אין חיבור ליוגי";
+            error = "אין חיבור ליוגי";
             LimeLog.warning("YugiChat: " + e);
         }
-        final String err = error;
+        finish(answer, error);
+    }
+
+    private void finish(Msg answer, String err) {
         ui.post(() -> {
             busy = false;
-            activeCall = null;
             if (err != null) {
                 synchronized (messages) {
                     if (answer.text.length() == 0) answer.text.append(err);
@@ -438,7 +776,6 @@ public final class YugiChat {
             if (liveBubble != null) liveBubble.setText(answer.text);
             liveBubble = null;
             refreshBusy();
-            setStatus("");
             scrollToEnd();
             if (err == null && speakNext) speak(answer.text.toString());
             speakNext = false;
@@ -461,7 +798,7 @@ public final class YugiChat {
             }
             @Override public void onResponse(Call call, Response r) {
                 r.close();
-                synchronized (messages) { messages.clear(); messages.add(new Msg("system", "שיחה חדשה")); }
+                synchronized (messages) { messages.clear(); }
                 ui.post(YugiChat.this::renderAll);
             }
         });
@@ -473,14 +810,15 @@ public final class YugiChat {
         if (tts != null) tts.stop();
         if (recorder != null) { finishRecording(); return; }
         if (recognizer != null) { stopListening(); return; }
-        if (a.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            a.requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 7101);
+        Context c = getContext();
+        if (c.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            if (c instanceof Activity) ((Activity) c).requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 7101);
             return;
         }
         // The WHIP side channel also uses the mic: pause it while dictating
         micWasOn = YugiMedia.isMicOn();
         if (micWasOn) YugiMedia.setMic(false);
-        if (SpeechRecognizer.isRecognitionAvailable(a)) startRecognizer();
+        if (SpeechRecognizer.isRecognitionAvailable(c)) startRecognizer();
         else startRecording();
     }
 
@@ -489,14 +827,25 @@ public final class YugiChat {
         micWasOn = false;
     }
 
+    private void setMicRecording(boolean rec) {
+        micSend.setImageResource(rec ? R.drawable.yugi_ic_stop : R.drawable.yugi_ic_mic);
+        micSend.setRotation(0);
+        GradientDrawable g = new GradientDrawable();
+        g.setShape(GradientDrawable.OVAL);
+        g.setColor(rec ? YugiTheme.DANGER : 0x00000000);
+        micSend.setBackground(g);
+        micSend.setImageTintList(android.content.res.ColorStateList.valueOf(YugiTheme.TEXT));
+        if (!rec) updateSendButton();
+    }
+
     private void startRecognizer() {
-        recognizer = SpeechRecognizer.createSpeechRecognizer(a);
+        recognizer = SpeechRecognizer.createSpeechRecognizer(getContext());
         Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "he-IL");
         i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
         recognizer.setRecognitionListener(new RecognitionListener() {
-            @Override public void onReadyForSpeech(Bundle p) { setStatus("מקשיב…"); micBtn.setText("■"); }
+            @Override public void onReadyForSpeech(Bundle p) { setStatus("מקשיב…"); setMicRecording(true); }
             @Override public void onBeginningOfSpeech() {}
             @Override public void onRmsChanged(float v) {}
             @Override public void onBufferReceived(byte[] b) {}
@@ -537,15 +886,15 @@ public final class YugiChat {
     private void stopListening() {
         destroyRecognizer();
         if (recorder == null) {
-            micBtn.setText("🎤");
+            setMicRecording(false);
             restoreMic();
         }
     }
 
     private void startRecording() {
         try {
-            recordFile = new File(a.getCacheDir(), "yugi-voice.m4a");
-            recorder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? new MediaRecorder(a) : new MediaRecorder();
+            recordFile = new File(getContext().getCacheDir(), "yugi-voice.m4a");
+            recorder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? new MediaRecorder(getContext()) : new MediaRecorder();
             recorder.setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION);
             recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
             recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
@@ -554,11 +903,11 @@ public final class YugiChat {
             recorder.setOutputFile(recordFile.getAbsolutePath());
             recorder.prepare();
             recorder.start();
-            micBtn.setText("■");
-            setStatus("מקליט… לחץ ■ לסיום");
+            setMicRecording(true);
+            setStatus("מקליט… לחץ לסיום");
         } catch (Exception e) {
             recorder = null;
-            micBtn.setText("🎤");
+            setMicRecording(false);
             restoreMic();
             setStatus("אין גישה למיקרופון");
         }
@@ -568,7 +917,7 @@ public final class YugiChat {
         try { recorder.stop(); } catch (Exception ignored) {}
         recorder.release();
         recorder = null;
-        micBtn.setText("🎤");
+        setMicRecording(false);
         restoreMic();
         setStatus("מתמלל…");
         final File f = recordFile;
@@ -601,7 +950,7 @@ public final class YugiChat {
         if (text == null || text.isEmpty()) return;
         final String clean = text.replaceAll("[*#`_>|]", " ").trim();
         if (tts == null) {
-            tts = new TextToSpeech(a.getApplicationContext(), status -> {
+            tts = new TextToSpeech(getContext().getApplicationContext(), status -> {
                 ttsReady = status == TextToSpeech.SUCCESS;
                 if (ttsReady) {
                     tts.setLanguage(new Locale("he", "IL"));
@@ -615,8 +964,12 @@ public final class YugiChat {
 
     /** Call from the activity's onDestroy. */
     public void release() {
+        if (current == this) current = null;
         stopListening();
         if (recorder != null) { try { recorder.release(); } catch (Exception ignored) {} recorder = null; }
         if (tts != null) { tts.shutdown(); tts = null; }
     }
+
+    @SuppressWarnings("unused")
+    static int clampColor(int c) { return Color.alpha(c) == 0 ? Color.BLACK : c; }
 }

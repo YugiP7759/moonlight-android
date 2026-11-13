@@ -1,0 +1,42 @@
+name: YugiPC UI QA
+
+on:
+  push:
+    branches: [yugipc]
+  workflow_dispatch:
+
+jobs:
+  qa:
+    if: github.repository == 'YugiP7759/yugipc-app'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests (pad math) and screenshot tests (Fold 7 screens)
+        run: ./gradlew --no-daemon testNonRoot_gameDebugUnitTest --tests 'com.limelight.yugi.*'
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yugi-screens
+          path: app/build/yugi-screens/
+          retention-days: 3
+
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yugi-test-report
+          path: app/build/reports/tests/
+          retention-days: 3
