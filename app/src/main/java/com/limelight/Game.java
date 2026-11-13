@@ -505,6 +505,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 com.limelight.yugi.YugiOverlay.attach(this);
             }
             com.limelight.yugi.YugiFps.reset(() -> runOnUiThread(this::yugiRestart));
+            com.limelight.yugi.YugiNav.attachMenuButton(this, () -> java.util.Arrays.asList(
+                    new com.limelight.yugi.YugiNav.Item("המחשב שלי", true, null),
+                    new com.limelight.yugi.YugiNav.Item("משחקים", false, this::yugiOpenGames)));
 
             // Fold/unfold or rotation: the window changes size (sometimes without a usable
             // onConfigurationChanged). Watch the real view size and re-stream on any aspect change.
@@ -3540,6 +3543,15 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         float now = (float) w / h;
         float stream = (float) prefConfig.width / prefConfig.height;
         return Math.abs(now / stream - 1f) > 0.03f;
+    }
+
+    /** YugiPC: switch to the games screen. The desktop session keeps running on the server (no quit). */
+    private void yugiOpenGames() {
+        yugiRestarting = true;
+        displayedFailureDialog = true;
+        com.limelight.yugi.YugiNav.openGames(this);
+        stopConnection();
+        finish();
     }
 
     /** YugiPC: freeze the last frame, end this stream quietly, and let the launcher re-stream at the new size/FPS. */

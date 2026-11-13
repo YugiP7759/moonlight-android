@@ -185,6 +185,7 @@ android {
 
 dependencies {
     implementation project(':whip')
+    implementation 'androidx.webkit:webkit:1.12.1'
     // Embedded Tailscale: only in private builds (the AAR carries the auth key; never commit it)
     if (file('libs/tsbridge.aar').exists()) {
         implementation files('libs/tsbridge.aar')

@@ -110,6 +110,17 @@
             <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
 
         </activity>
+        <!-- YugiPC: "משחקים" (Boosteroid in a WebView with our own gamepad) -->
+        <activity
+            android:name=".yugi.GamesActivity"
+            android:exported="false"
+            android:label="משחקים"
+            android:hardwareAccelerated="true"
+            android:resizeableActivity="true"
+            android:screenOrientation="fullSensor"
+            android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection|density" />
         <!-- YugiPC: the only launcher entry. Connects straight to the desktop stream. -->
         <activity
             android:name=".yugi.YugiLauncher"
@@ -117,7 +128,6 @@
             android:screenOrientation="fullSensor"
             android:label="YugiPC"
             android:resizeableActivity="true"
-            android:launchMode="singleTask"
             android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
             android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection|density">
             <intent-filter>

@@ -83,6 +83,14 @@ public class YugiLauncher extends Activity {
     protected void onResume() {
         super.onResume();
         if (askingPermissions) return;
+        if (YugiNav.connectNow) {
+            // Back from the games screen: connect right away (the desktop session is still running)
+            YugiNav.connectNow = false;
+            launchedGame = false;
+            quickFailures = 0;
+            if (!working) connect();
+            return;
+        }
         if (!getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_PERMS_ASKED, false)) {
             askPermissions();
             return;

@@ -49,3 +49,8 @@
 # YugiPC: embedded Tailscale bridge (gomobile), called by reflection
 -keep class com.yugipc.tsbridge.** { *; }
 -keep class go.** { *; }
+
+# YugiPC: JS bridge for the games WebView
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
