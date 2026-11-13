@@ -259,7 +259,8 @@ public class YugiLauncher extends Activity {
         X509Certificate cert = loadCert();
 
         // 0. Embedded Tailscale (private builds): bring the tailnet up, then talk to 127.0.0.1
-        boolean tunnel = YugiTunnel.isAvailable();
+        // Without a baked-in key the embedded node cannot log in: use the phone's Tailscale app instead.
+        boolean tunnel = YugiTunnel.isAvailable() && YugiTunnel.hasBuiltinKey();
         if (tunnel) {
             showStatus("מתחבר לרשת…", true);
             if (!YugiTunnel.ensureReady(this)) {
