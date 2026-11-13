@@ -30,7 +30,7 @@ public final class YugiKeyLayout {
     // keyboard-only "modifiers"
     public static final int M_FN = 0x100, M_CAPS = 0x200;
 
-    public static final int A_LANG = 1, A_HIDE = 2;
+    public static final int A_LANG = 1, A_HIDE = 2, A_MIC = 3;
 
     private static final String US_PLAIN = "`1234567890-=[]\\;',./";
     private static final String US_SHIFT = "~!@#$%^&*()_+{}|:\"<>?";
@@ -153,7 +153,8 @@ public final class YugiKeyLayout {
         l.mod(r, "Win", M_WIN, 1f);
         l.mod(r, "Alt", M_ALT, 1.25f);
         l.action(r, "EN", A_LANG, 1.25f);
-        l.chr(r, ' ', 4.25f);
+        l.action(r, "mic", A_MIC, 1f);
+        l.chr(r, ' ', 3.25f);
         l.special(r, "Del", KeyEvent.KEYCODE_FORWARD_DEL, 1f, true);
         l.special(r, "←", KeyEvent.KEYCODE_DPAD_LEFT, 1f, true);
         l.special(r, "↓", KeyEvent.KEYCODE_DPAD_DOWN, 1f, true);
@@ -188,8 +189,9 @@ public final class YugiKeyLayout {
         l.mod(r, "⇧", M_SHIFT, 1f);
         l.chars(r, "zxcvbnm,./");
         r++;
-        l.action(r, "EN", A_LANG, 1.5f);
-        l.chr(r, ' ', 5.5f);
+        l.action(r, "EN", A_LANG, 1.25f);
+        l.action(r, "mic", A_MIC, 1f);
+        l.chr(r, ' ', 4.75f);
         l.special(r, "Enter", KeyEvent.KEYCODE_ENTER, 2.5f, false);
         l.action(r, "⌨", A_HIDE, 1.5f);
         l.finish();

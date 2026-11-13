@@ -162,6 +162,8 @@ public class YugiChat extends FrameLayout {
     private boolean open;
     private int imeInset;
     private int navInset;
+    private int kbInset;             // our own keyboard (animated with its spring)
+    private YugiFieldKeyboard fieldKb;
     private TextView liveBubble;
     private YugiChatBubble fab;
     private TextToSpeech tts;
@@ -288,6 +290,7 @@ public class YugiChat extends FrameLayout {
         input.setMaxLines(5);
         input.setImeOptions(EditorInfo.IME_ACTION_SEND | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
         input.setTextDirection(TEXT_DIRECTION_FIRST_STRONG);
+        input.setShowSoftInputOnFocus(false); // the YugiPC keyboard types here, never the phone's
         input.setOnEditorActionListener((v, id, ev) -> {
             if (id == EditorInfo.IME_ACTION_SEND || (ev != null && ev.getKeyCode() == KeyEvent.KEYCODE_ENTER
                     && ev.getAction() == KeyEvent.ACTION_DOWN)) {
@@ -418,6 +421,7 @@ public class YugiChat extends FrameLayout {
         YugiChat c = new YugiChat(a, host);
         a.addContentView(c, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         c.fab = YugiChatBubble.attach(a, c::toggle);
+        c.attachKeyboard(a);
         current = c;
         c.renderPending();
         if (reopenOnAttach) {
@@ -426,6 +430,27 @@ public class YugiChat extends FrameLayout {
         }
         return c;
     }
+
+    /** Our keyboard for the input field: the card rides up with it, on the same spring. */
+    void attachKeyboard(Activity a) {
+        fieldKb = YugiFieldKeyboard.attach(a);
+        fieldKb.bind(input, this::sendTyped);
+        fieldKb.setInsetListener(new YugiFieldKeyboard.InsetListener() {
+            @Override public void onKeyboardInset(int px) {
+                if (px == kbInset) return;
+                boolean wasTight = tight();
+                kbInset = px;
+                applyTight(wasTight);
+                requestLayout();
+            }
+            @Override public void onShown(boolean shown) {
+                if (shown) { stickToBottom = true; scrollToEnd(); }
+            }
+        });
+    }
+
+    /** The in-app keyboard (tests). */
+    public YugiFieldKeyboard fieldKeyboard() { return fieldKb; }
 
     /** Opens the shared file picker screen (works from the stream too, which can't host a picker). */
     public static void openPicker(Activity from) {
@@ -449,7 +474,7 @@ public class YugiChat extends FrameLayout {
     /** Short screen (cover screen in landscape) or keyboard up: use the whole height, compact attachments. */
     private boolean tight() {
         android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
-        return imeInset > 0 || dm.heightPixels / dm.density < 500;
+        return imeInset > 0 || kbInset > 0 || dm.heightPixels / dm.density < 500;
     }
 
     private void applyTight(boolean wasTight) {
@@ -487,7 +512,7 @@ public class YugiChat extends FrameLayout {
         int m = dp(12);
         // With the keyboard up the toolbar hides, so the card can use the whole height above it
         int top = tight() ? m : Math.max(m, host != null ? host.reservedTop() : m);
-        int bottom = h - Math.max(m, Math.max(imeInset, navInset) + m);
+        int bottom = h - Math.max(m, Math.max(Math.max(imeInset, kbInset), navInset) + m);
         int width = w >= dp(600) ? Math.min(dp(420), (int) (w * 0.46f)) : w - 2 * m;
         boolean rtl = getLayoutDirection() == LAYOUT_DIRECTION_RTL;
         int left = rtl ? m : w - m - width;
@@ -561,6 +586,7 @@ public class YugiChat extends FrameLayout {
     }
 
     private void hideKeyboard() {
+        if (fieldKb != null) fieldKb.hide();
         InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
         if (imm != null) imm.hideSoftInputFromWindow(input.getWindowToken(), 0);
         input.clearFocus();
@@ -1209,6 +1235,7 @@ public class YugiChat extends FrameLayout {
     /** Call from the activity's onDestroy. */
     public void release() {
         if (current == this) current = null;
+        if (fieldKb != null) fieldKb.release();
         stopListening();
         if (recorder != null) { try { recorder.release(); } catch (Exception ignored) {} recorder = null; }
         if (tts != null) { tts.shutdown(); tts = null; }

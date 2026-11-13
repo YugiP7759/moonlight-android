@@ -4,7 +4,11 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.RectF;
+import android.media.AudioManager;
+import android.text.TextPaint;
+import android.text.TextUtils;
 import android.graphics.Typeface;
 import android.os.Build;
 import android.os.SystemClock;
@@ -31,6 +35,12 @@ public class YugiKeyboard extends View {
         void onHideRequested();
         /** Any key touched (used to keep the toolbar quiet, etc.). */
         default void onKeyTouched() {}
+        /** The mic key: start or stop dictation in the keyboard's language. */
+        default void onMicRequested(boolean hebrew) {}
+        /** Long press on the language key. */
+        default void onSettingsRequested() {}
+        /** Size, mode or position changed (settings, drag): re-place what rides on the keyboard. */
+        default void onGeometryChanged() {}
     }
 
     private static final int MAXP = 10;               // tracked pointers
@@ -62,6 +72,29 @@ public class YugiKeyboard extends View {
     private float[] fnSize = new float[0];
     private float hintSize, bubbleTextSize;
     private int screenH;
+    // settings-driven geometry: the panel rect and the key area inside it
+    private YugiKbdSettings set;
+    private int mode = YugiKbdSettings.DOCKED; // effective (split needs a wide screen)
+    private int hand = YugiKbdSettings.HAND_NONE;
+    private float panelL, panelT, panelR, panelB, keysL, keysR, handleH, stripL, stripR;
+    private float splitGapL = -1, splitGapR = -1;
+
+    // dictation
+    private boolean listening;
+    private float voiceLevel;
+    private String voicePreview;
+    private final TextPaint previewPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final Path micPath = new Path();
+
+    // floating drag
+    private int dragPointer = -1;
+    private float dragDX, dragDY;
+    private final AudioManager audio;
+    private final YugiKbdSettings.Listener settingsListener = s -> {
+        requestLayout();
+        invalidate();
+        this.host.onGeometryChanged();
+    };
 
     // per-key visual state
     private float[] pressT = new float[0];      // 1 while held, fades after release
@@ -109,6 +142,10 @@ public class YugiKeyboard extends View {
         hintPaint.setTextAlign(Paint.Align.RIGHT);
         bubblePaint.setColor(BUBBLE);
         if (Build.VERSION.SDK_INT >= 28) bubblePaint.setShadowLayer(10 * dp, 0, 3 * dp, 0x80000000);
+        previewPaint.setColor(YugiTheme.TEXT);
+        previewPaint.setTypeface(regular);
+        audio = (AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
+        set = YugiKbdSettings.get(c);
         for (int i = 0; i < MAXP; i++) pKey[i] = -1;
         setHapticFeedbackEnabled(true);
         setClickable(true);
@@ -119,35 +156,58 @@ public class YugiKeyboard extends View {
 
     // ------------------------------------------------------------------ sizing
 
-    /** Total height (headroom + keys) for a window of this size. */
+    /**
+     * Total view height for a window of this size: headroom + panel when docked; the whole window when
+     * floating (touches outside the panel fall through).
+     */
     public int preferredHeight(int windowW, int windowH) {
         configure(windowW, windowH);
-        return Math.round(headroom + panelHeight());
+        return mode == YugiKbdSettings.FLOATING ? windowH : Math.round(headroom + panelHeight());
     }
 
     /** Height of the visible keyboard panel (without the transparent headroom). */
     public float panelHeight() {
-        float h = padTop + padBottom;
+        float h = padTop + padBottom + handleH;
         for (int i = 0; i < layout.rows; i++) h += rowH * layout.rowHeights[i] + (i > 0 ? gap : 0);
         return h;
     }
 
+    /** How much of the window bottom the keyboard covers (0 when floating: nothing is pushed up). */
+    public float pushHeight() { return mode == YugiKbdSettings.FLOATING ? 0f : panelHeight(); }
+
     public float headroom() { return headroom; }
+    public int effectiveMode() { return mode; }
+    /** Panel rect in view pixels: {left, top, right, bottom}. */
+    public float[] panelBounds() { return new float[]{panelL, panelT, panelR, panelB}; }
+    /** Split mode: the empty middle {left, right}, or null. */
+    public float[] splitGap() { return splitGapL < 0 ? null : new float[]{splitGapL, splitGapR}; }
 
     private void configure(int w, int h) {
         screenH = h;
-        YugiKeyLayout want = w / dp < 600 ? compact : full;
-        if (want != layout) {
-            layout = want;
-            engine.reset();
-        }
-        rowH = clamp(h * 0.082f, 36 * dp, 52 * dp);
+        set = YugiKbdSettings.get(getContext());
+        float wdp = w / dp;
+        mode = set.mode;
+        if (mode == YugiKbdSettings.SPLIT && wdp < 600) mode = YugiKbdSettings.DOCKED;
+        hand = mode == YugiKbdSettings.DOCKED ? set.hand : YugiKbdSettings.HAND_NONE;
+        boolean floating = mode == YugiKbdSettings.FLOATING;
+        rowH = clamp(clamp(h * 0.082f, 36 * dp, 52 * dp) * set.height, 30 * dp, 68 * dp);
+        if (floating) rowH = Math.min(rowH, 44 * dp * set.height);
         gap = Math.max(4 * dp, rowH * 0.13f);
         padX = 6 * dp;
         padTop = 8 * dp;
         padBottom = 10 * dp;
+        handleH = floating ? 20 * dp : 0;
         radius = Math.min(9 * dp, rowH * 0.2f);
         headroom = rowH * 1.45f + 8 * dp;
+        // horizontal extent of the panel and of the keys
+        float pw = floating ? Math.min(w - 16 * dp, 400 * dp) : w;
+        float keysW = pw - 2 * padX;
+        if (hand != YugiKbdSettings.HAND_NONE) keysW = Math.min(w - 52 * dp, Math.max(330 * dp, w * 0.5f)) - 2 * padX;
+        YugiKeyLayout want = mode != YugiKbdSettings.SPLIT && keysW / dp < 590 ? compact : full;
+        if (want != layout) {
+            layout = want;
+            engine.reset();
+        }
     }
 
     @Override
@@ -164,6 +224,53 @@ public class YugiKeyboard extends View {
         layoutKeys(r - l); // also when only the layout (full/compact) or the row height changed
     }
 
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        YugiKbdSettings.addListener(settingsListener);
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        YugiKbdSettings.removeListener(settingsListener);
+        super.onDetachedFromWindow();
+    }
+
+    /** Places the panel for the current mode (floating: at the saved spot, kept on screen). */
+    private void placePanel(int w) {
+        float ph = panelHeight();
+        stripL = stripR = -1;
+        if (mode == YugiKbdSettings.FLOATING) {
+            int viewH = getHeight() > 0 ? getHeight() : screenH;
+            float pw = Math.min(w - 16 * dp, 400 * dp);
+            panelL = clamp(set.floatX * w - pw / 2, 4 * dp, w - pw - 4 * dp);
+            panelR = panelL + pw;
+            panelT = clamp(set.floatY * viewH - ph / 2, rowH * 1.45f, viewH - ph - 4 * dp);
+            panelB = panelT + ph;
+            keysL = panelL + padX;
+            keysR = panelR - padX;
+            return;
+        }
+        panelL = 0;
+        panelR = w;
+        panelT = headroom;
+        panelB = headroom + ph;
+        keysL = padX;
+        keysR = w - padX;
+        if (hand != YugiKbdSettings.HAND_NONE) {
+            float kw = Math.min(w - 52 * dp, Math.max(330 * dp, w * 0.5f)) - 2 * padX;
+            if (hand == YugiKbdSettings.HAND_RIGHT) {
+                keysL = keysR - kw;
+                stripL = 0;
+                stripR = keysL - padX;
+            } else {
+                keysR = keysL + kw;
+                stripL = keysR + padX;
+                stripR = w;
+            }
+        }
+    }
+
     private void layoutKeys(int w) {
         int n = layout.keys.size();
         if (kl.length != n) {
@@ -174,24 +281,61 @@ public class YugiKeyboard extends View {
             releasedAt = new long[n];
             holdCount = new int[n];
         }
-        float unit = (w - 2 * padX + gap) / layout.widthUnits;
+        placePanel(w);
+        float keysW = keysR - keysL;
+        float unit = (keysW + gap) / layout.widthUnits;
         float[] rowTop = new float[layout.rows];
-        float y = headroom + padTop;
+        float y = panelT + handleH + padTop;
         for (int i = 0; i < layout.rows; i++) {
             rowTop[i] = y;
             y += rowH * layout.rowHeights[i] + gap;
         }
-        float base = rowH * 0.42f;
-        hintSize = rowH * 0.22f;
-        bubbleTextSize = rowH * 0.7f;
+        // split: each row breaks at the key edge nearest its middle; the halves keep the outer edges
+        boolean split = mode == YugiKbdSettings.SPLIT;
+        float halfW = split ? (keysW - keysW * 0.26f) / 2 : 0;
+        float[] rowSplit = new float[layout.rows];
+        if (split) {
+            float mid = layout.widthUnits / 2;
+            for (int r0 = 0; r0 < layout.rows; r0++) {
+                float best = mid, bestD = Float.MAX_VALUE;
+                for (YugiKeyLayout.Key k : layout.keys) {
+                    if (k.row != r0) continue;
+                    float edge = k.x + k.units;
+                    if (edge >= layout.widthUnits - 0.01f) continue;
+                    if (Math.abs(edge - mid) < bestD) { bestD = Math.abs(edge - mid); best = edge; }
+                }
+                rowSplit[r0] = best;
+            }
+            splitGapL = keysL + halfW;
+            splitGapR = keysR - halfW;
+        } else {
+            splitGapL = splitGapR = -1;
+        }
+        float base = rowH * 0.42f * set.font;
+        hintSize = rowH * 0.22f * set.font;
+        bubbleTextSize = rowH * 0.7f * set.font;
         for (int i = 0; i < n; i++) {
             YugiKeyLayout.Key k = layout.keys.get(i);
-            kl[i] = padX + k.x * unit;
-            kr[i] = padX + (k.x + k.units) * unit - gap;
+            if (split) {
+                float s0 = rowSplit[k.row];
+                if (k.x + k.units / 2 <= s0) {
+                    float u = (halfW + gap) / s0;
+                    kl[i] = keysL + k.x * u;
+                    kr[i] = keysL + (k.x + k.units) * u - gap;
+                } else {
+                    float u = (halfW + gap) / (layout.widthUnits - s0);
+                    float b0 = keysR - halfW;
+                    kl[i] = b0 + (k.x - s0) * u;
+                    kr[i] = b0 + (k.x + k.units - s0) * u - gap;
+                }
+            } else {
+                kl[i] = keysL + k.x * unit;
+                kr[i] = keysL + (k.x + k.units) * unit - gap;
+            }
             kt[i] = rowTop[k.row];
             kb[i] = kt[i] + rowH * layout.rowHeights[k.row];
             boolean glyph = k.label != null && k.label.codePointCount(0, k.label.length()) == 1; // ⇧ ⌫ ← ⌨
-            float size = (k.kind == YugiKeyLayout.CHAR && k.us != ' ') || glyph ? base : rowH * 0.3f;
+            float size = (k.kind == YugiKeyLayout.CHAR && k.us != ' ') || glyph ? base : rowH * 0.3f * set.font;
             if (layout.rowHeights[k.row] < 1f) size *= 0.92f;
             // fit the widest label this key can show (no text ever touches the key edge)
             float room = (kr[i] - kl[i]) - 8 * dp;
@@ -203,7 +347,7 @@ public class YugiKeyboard extends View {
             if (widest > room && widest > 0) size *= room / widest;
             textSize[i] = size;
             // F-keys fit on their own, so "0" keeps the size of the other digits
-            float fs = rowH * 0.3f;
+            float fs = rowH * 0.3f * set.font;
             textPaint.setTextSize(fs);
             float fw = width(k.fnLabel);
             fnSize[i] = fw > room && fw > 0 ? fs * room / fw : fs;
@@ -227,9 +371,25 @@ public class YugiKeyboard extends View {
     @Override
     protected void onDraw(Canvas c) {
         int w = getWidth();
-        float top = headroom;
-        c.drawRect(0, top, w, getHeight(), panelPaint);
-        c.drawRect(0, top, w, top + Math.max(1, dp * 0.6f), hairPaint);
+        float top = panelT;
+        if (mode == YugiKbdSettings.FLOATING) {
+            r.set(panelL, panelT, panelR, panelB);
+            float pr = radius * 2f;
+            r.offset(0, 4 * dp);
+            c.drawRoundRect(r, pr, pr, shadowPaint);
+            r.offset(0, -4 * dp);
+            c.drawRoundRect(r, pr, pr, panelPaint);
+            // grabber
+            float gw = 36 * dp, cx0 = (panelL + panelR) / 2, gy = panelT + handleH * 0.55f;
+            r.set(cx0 - gw / 2, gy - 2.5f * dp, cx0 + gw / 2, gy + 2.5f * dp);
+            hintPaint.setColor(dragPointer >= 0 ? YugiTheme.TEXT_DIM : YugiTheme.TEXT_FAINT);
+            c.drawRoundRect(r, 3 * dp, 3 * dp, hintPaint);
+            hintPaint.setColor(YugiTheme.TEXT_FAINT);
+        } else {
+            c.drawRect(0, top, w, getHeight(), panelPaint);
+            c.drawRect(0, top, w, top + Math.max(1, dp * 0.6f), hairPaint);
+            if (stripL >= 0) drawStripChevron(c);
+        }
 
         boolean heb = engine.hebrew, shift = engine.shift(), caps = engine.caps(), fn = engine.fn();
         long now = SystemClock.uptimeMillis();
@@ -251,6 +411,10 @@ public class YugiKeyboard extends View {
             r.set(kl[i], kt[i], kr[i], kb[i]);
             c.drawRoundRect(r, radius, radius, keyPaint);
 
+            if (k.kind == YugiKeyLayout.ACTION && k.code == YugiKeyLayout.A_MIC) {
+                if (drawMicKey(c, i, now)) animating = true;
+                continue;
+            }
             String label = YugiKeyLayout.label(k, heb, shift, caps, fn);
             if (label == null) continue;
             textPaint.setTextSize(fn && k.fnLabel != null ? fnSize[i] : textSize[i]);
@@ -260,6 +424,14 @@ public class YugiKeyboard extends View {
             if (k.hint != null && !fn && !(heb && k.he != null && !k.he.equals(k.enLower)) && rowH > 30 * dp) {
                 hintPaint.setTextSize(hintSize);
                 c.drawText(k.hint, kr[i] - 4 * dp, kt[i] + 3 * dp - hintPaint.ascent(), hintPaint);
+            }
+            if (k.kind == YugiKeyLayout.ACTION && k.code == YugiKeyLayout.A_LANG && rowH > 30 * dp) {
+                // long press opens the settings: a small ring in the corner says so
+                float rr = Math.max(2.2f * dp, rowH * 0.06f);
+                hintPaint.setStyle(Paint.Style.STROKE);
+                hintPaint.setStrokeWidth(1.2f * dp);
+                c.drawCircle(kr[i] - 4 * dp - rr, kt[i] + 4 * dp + rr, rr, hintPaint);
+                hintPaint.setStyle(Paint.Style.FILL);
             }
             if (modOn && engine.isLocked(k.code)) {
                 // locked (Caps, Fn): a small bar under the label
@@ -271,6 +443,7 @@ public class YugiKeyboard extends View {
             }
         }
 
+        if (listening && voicePreview != null && !voicePreview.isEmpty()) drawPreview(c);
         if (altPointer >= 0 && alts != null) drawAlternates(c);
         else if (bubblePointer >= 0 && pKey[bubblePointer] >= 0) drawBubble(c, pKey[bubblePointer], heb, shift, caps, fn);
 
@@ -321,6 +494,103 @@ public class YugiKeyboard extends View {
         }
     }
 
+    /** Mic key: a mic glyph; while listening an accent key with a live level meter. Returns true to keep animating. */
+    private boolean drawMicKey(Canvas c, int i, long now) {
+        float cx = (kl[i] + kr[i]) * 0.5f, cy = (kt[i] + kb[i]) * 0.5f;
+        float s = Math.min(kr[i] - kl[i], kb[i] - kt[i]) * 0.5f * Math.min(1.15f, set.font);
+        if (!listening) {
+            textPaint.setColor(YugiTheme.TEXT_DIM);
+            drawMicGlyph(c, cx, cy, s, textPaint);
+            return false;
+        }
+        // soft halo that breathes with the voice, then the key in accent
+        float grow = (2f + 4f * voiceLevel) * dp;
+        r.set(kl[i] - grow, kt[i] - grow, kr[i] + grow, kb[i] + grow);
+        keyPaint.setColor((int) (0x30 + 0x40 * voiceLevel) << 24 | (YugiTheme.ACCENT & 0xFFFFFF));
+        c.drawRoundRect(r, radius + grow, radius + grow, keyPaint);
+        r.set(kl[i], kt[i], kr[i], kb[i]);
+        keyPaint.setColor(YugiTheme.ACCENT);
+        c.drawRoundRect(r, radius, radius, keyPaint);
+        // five bars, like iOS dictation
+        float bw = Math.max(2 * dp, s * 0.14f), step = bw * 1.9f;
+        float maxH = (kb[i] - kt[i]) * 0.56f;
+        keyPaint.setColor(YugiTheme.BRAND_BG);
+        for (int j = 0; j < 5; j++) {
+            double wave = 0.5 + 0.5 * Math.sin(now / 110.0 + j * 1.3);
+            float hh = maxH * (0.18f + 0.82f * voiceLevel * (float) (0.45 + 0.55 * wave));
+            float x = cx + (j - 2) * step;
+            r.set(x - bw / 2, cy - hh / 2, x + bw / 2, cy + hh / 2);
+            c.drawRoundRect(r, bw / 2, bw / 2, keyPaint);
+        }
+        return true;
+    }
+
+    private void drawMicGlyph(Canvas c, float cx, float cy, float s, Paint p) {
+        float bodyW = s * 0.36f, bodyH = s * 0.62f, top = cy - s * 0.52f;
+        r.set(cx - bodyW / 2, top, cx + bodyW / 2, top + bodyH);
+        c.drawRoundRect(r, bodyW / 2, bodyW / 2, p);
+        Paint.Style old = p.getStyle();
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeWidth(Math.max(1.4f * dp, s * 0.07f));
+        p.setStrokeCap(Paint.Cap.ROUND);
+        float cupW = s * 0.6f;
+        r.set(cx - cupW / 2, top + bodyH * 0.35f, cx + cupW / 2, top + bodyH * 1.15f);
+        micPath.rewind();
+        micPath.addArc(r, 0, 180);
+        c.drawPath(micPath, p);
+        float stemTop = r.bottom, stemBot = stemTop + s * 0.18f;
+        c.drawLine(cx, stemTop, cx, stemBot, p);
+        c.drawLine(cx - s * 0.16f, stemBot, cx + s * 0.16f, stemBot, p);
+        p.setStyle(old);
+    }
+
+    private void drawPreview(Canvas c) {
+        float h = rowH * 0.9f, pad = 12 * dp;
+        float tw = previewPaint.measureText(voicePreview);
+        float pw = tw + 2 * pad;
+        float cx = (panelL + panelR) / 2;
+        float bottom = panelT - 6 * dp;
+        r.set(cx - pw / 2, bottom - h, cx + pw / 2, bottom);
+        c.drawRoundRect(r, h / 2, h / 2, bubblePaint);
+        c.drawText(voicePreview, r.left + pad, r.centerY() - (previewPaint.ascent() + previewPaint.descent()) * 0.5f, previewPaint);
+    }
+
+    private void drawStripChevron(Canvas c) {
+        float cx = (stripL + stripR) / 2, cy = (panelT + panelB) / 2, s = 7 * dp;
+        hintPaint.setStyle(Paint.Style.STROKE);
+        hintPaint.setStrokeWidth(2.2f * dp);
+        hintPaint.setStrokeCap(Paint.Cap.ROUND);
+        hintPaint.setColor(YugiTheme.TEXT_DIM);
+        float dir = hand == YugiKbdSettings.HAND_RIGHT ? -1 : 1; // points to the side the keys come back to
+        c.drawLine(cx - dir * s * 0.5f, cy - s, cx + dir * s * 0.5f, cy, hintPaint);
+        c.drawLine(cx + dir * s * 0.5f, cy, cx - dir * s * 0.5f, cy + s, hintPaint);
+        hintPaint.setStyle(Paint.Style.FILL);
+        hintPaint.setColor(YugiTheme.TEXT_FAINT);
+    }
+
+    // ------------------------------------------------------------------ dictation state (from the host)
+
+    public void setListening(boolean on) {
+        listening = on;
+        if (!on) { voiceLevel = 0; voicePreview = null; }
+        invalidate();
+    }
+
+    public boolean isListening() { return listening; }
+
+    public void setVoiceLevel(float level) {
+        voiceLevel = Math.max(0f, Math.min(1f, level));
+    }
+
+    /** Live dictation text shown above the keys (desktop: nothing is typed until the end). */
+    public void setVoicePreview(String s) {
+        if (s == null || s.isEmpty()) { voicePreview = null; invalidate(); return; }
+        previewPaint.setTextSize(rowH * 0.36f * set.font);
+        float avail = Math.max(60 * dp, (panelR - panelL) - 48 * dp);
+        voicePreview = TextUtils.ellipsize(s, previewPaint, avail, TextUtils.TruncateAt.START).toString();
+        invalidate();
+    }
+
     private static int blend(int a, int b, float t) {
         int ar = (a >> 16) & 0xFF, ag = (a >> 8) & 0xFF, ab = a & 0xFF;
         int br = (b >> 16) & 0xFF, bg = (b >> 8) & 0xFF, bb = b & 0xFF;
@@ -329,8 +599,14 @@ public class YugiKeyboard extends View {
 
     // ------------------------------------------------------------------ touch
 
+    private boolean inPanel(float x, float y) {
+        return x >= panelL && x <= panelR && y >= panelT && y <= panelB + 1;
+    }
+
     private int hit(float x, float y) {
-        if (y < headroom) return -1;
+        if (!inPanel(x, y)) return -1;
+        if (stripL >= 0 && x >= stripL && x <= stripR) return -1;
+        if (handleH > 0 && y < panelT + handleH) return -1;
         int n = layout.keys.size();
         int best = -1;
         float bestD = Float.MAX_VALUE;
@@ -352,12 +628,32 @@ public class YugiKeyboard extends View {
         int id = e.getPointerId(idx);
         switch (action) {
             case MotionEvent.ACTION_DOWN:
-                if (e.getY() < headroom) return false; // the desktop above stays touchable
+                if (!inPanel(e.getX(), e.getY())) return false; // the desktop around stays touchable
                 // fall through
-            case MotionEvent.ACTION_POINTER_DOWN:
-                if (id < MAXP) down(id, e.getX(idx), e.getY(idx));
+            case MotionEvent.ACTION_POINTER_DOWN: {
+                float x = e.getX(idx), y = e.getY(idx);
+                if (stripL >= 0 && x >= stripL && x <= stripR && y >= panelT) {
+                    // one-handed: the empty side brings the full keyboard back
+                    feedback(HapticFeedbackConstants.VIRTUAL_KEY, AudioManager.FX_KEYPRESS_STANDARD);
+                    set.hand = YugiKbdSettings.HAND_NONE;
+                    set.apply(getContext());
+                    return true;
+                }
+                if (handleH > 0 && dragPointer < 0 && inPanel(x, y) && y < panelT + handleH) {
+                    dragPointer = id;
+                    dragDX = x - panelL;
+                    dragDY = y - panelT;
+                    invalidate();
+                    return true;
+                }
+                if (id < MAXP) down(id, x, y);
                 return true;
+            }
             case MotionEvent.ACTION_MOVE:
+                if (dragPointer >= 0) {
+                    int pi = e.findPointerIndex(dragPointer);
+                    if (pi >= 0) dragTo(e.getX(pi) - dragDX, e.getY(pi) - dragDY);
+                }
                 for (int p = 0; p < e.getPointerCount(); p++) {
                     int pid = e.getPointerId(p);
                     if (pid < MAXP) move(pid, e.getX(p), e.getY(p));
@@ -365,9 +661,11 @@ public class YugiKeyboard extends View {
                 return true;
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_POINTER_UP:
+                if (id == dragPointer) { endDrag(); return true; }
                 if (id < MAXP) up(id, e.getEventTime(), false);
                 return true;
             case MotionEvent.ACTION_CANCEL:
+                if (dragPointer >= 0) endDrag();
                 releaseAll();
                 return true;
             default:
@@ -389,9 +687,13 @@ public class YugiKeyboard extends View {
         pKey[id] = i;
         pCommitted[id] = false;
         press(i);
-        performHapticFeedback(Build.VERSION.SDK_INT >= 27 ? HapticFeedbackConstants.KEYBOARD_PRESS : HapticFeedbackConstants.KEYBOARD_TAP);
-        host.onKeyTouched();
         YugiKeyLayout.Key k = layout.keys.get(i);
+        int fx = k.kind == YugiKeyLayout.SPECIAL && k.code == android.view.KeyEvent.KEYCODE_DEL ? AudioManager.FX_KEYPRESS_DELETE
+                : k.kind == YugiKeyLayout.SPECIAL && k.code == android.view.KeyEvent.KEYCODE_ENTER ? AudioManager.FX_KEYPRESS_RETURN
+                : k.kind == YugiKeyLayout.CHAR && k.us == ' ' ? AudioManager.FX_KEYPRESS_SPACEBAR
+                : AudioManager.FX_KEYPRESS_STANDARD;
+        feedback(Build.VERSION.SDK_INT >= 27 ? HapticFeedbackConstants.KEYBOARD_PRESS : HapticFeedbackConstants.KEYBOARD_TAP, fx);
+        host.onKeyTouched();
         switch (k.kind) {
             case YugiKeyLayout.CHAR:
                 bubblePointer = id;
@@ -412,10 +714,43 @@ public class YugiKeyboard extends View {
             case YugiKeyLayout.MOD:
                 engine.modDown(k.code);
                 break;
+            case YugiKeyLayout.ACTION:
+                if (k.code == YugiKeyLayout.A_LANG) {
+                    longPressPointer = id;
+                    postDelayed(longPress, LONG_PRESS_MS);
+                }
+                break;
             default:
                 break;
         }
         invalidate();
+    }
+
+    /** Haptic tick and key click, as the settings allow. */
+    private void feedback(int haptic, int sound) {
+        if (set.haptics) performHapticFeedback(haptic);
+        if (set.sound && audio != null) audio.playSoundEffect(sound, -1);
+    }
+
+    private void dragTo(float left, float top) {
+        int w = getWidth(), h = getHeight();
+        float pw = panelR - panelL, ph = panelB - panelT;
+        if (w <= 0 || h <= 0) return;
+        set.floatX = clamp((left + pw / 2) / w, 0f, 1f);
+        set.floatY = clamp((top + ph / 2) / h, 0f, 1f);
+        layoutKeys(w);
+        invalidate();
+    }
+
+    private void endDrag() {
+        dragPointer = -1;
+        // keep where it actually landed (after the on-screen clamp)
+        int w = getWidth(), h = getHeight();
+        if (w > 0 && h > 0) {
+            set.floatX = (panelL + panelR) / 2 / w;
+            set.floatY = (panelT + panelB) / 2 / h;
+        }
+        set.apply(getContext());
     }
 
     private void move(int id, float x, float y) {
@@ -427,7 +762,7 @@ public class YugiKeyboard extends View {
             sel = Math.max(0, Math.min(alts.length - 1, sel));
             if (sel != altSel) {
                 altSel = sel;
-                performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                if (set.haptics) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
                 invalidate();
             }
             return;
@@ -467,9 +802,10 @@ public class YugiKeyboard extends View {
                 if (!cancel) engine.modUp(k.code, time);
                 break;
             case YugiKeyLayout.ACTION:
-                if (!cancel) {
+                if (!cancel && !pCommitted[id]) {
                     if (k.code == YugiKeyLayout.A_LANG) engine.toggleLanguage();
                     else if (k.code == YugiKeyLayout.A_HIDE) host.onHideRequested();
+                    else if (k.code == YugiKeyLayout.A_MIC) host.onMicRequested(engine.hebrew);
                 }
                 break;
             default:
@@ -496,6 +832,14 @@ public class YugiKeyboard extends View {
         longPressPointer = -1;
         if (id < 0 || pKey[id] < 0 || pCommitted[id]) return;
         YugiKeyLayout.Key k = layout.keys.get(pKey[id]);
+        if (k.kind == YugiKeyLayout.ACTION) {
+            if (k.code == YugiKeyLayout.A_LANG) {
+                pCommitted[id] = true; // the release does not switch the language
+                feedback(HapticFeedbackConstants.LONG_PRESS, AudioManager.FX_KEYPRESS_STANDARD);
+                host.onSettingsRequested();
+            }
+            return;
+        }
         String out = YugiKeyLayout.output(k, engine.hebrew, engine.shift(), engine.caps());
         String[] a = YugiKeyLayout.alternates(out);
         if (a == null) return;
@@ -503,7 +847,7 @@ public class YugiKeyboard extends View {
         altKey = pKey[id];
         altPointer = id;
         altSel = 0;
-        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+        if (set.haptics) performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
         invalidate();
     }
 
@@ -527,6 +871,7 @@ public class YugiKeyboard extends View {
         for (int p = 0; p < MAXP; p++) pKey[p] = -1;
         for (int i = 0; i < pressT.length; i++) { pressT[i] = 0; holdCount[i] = 0; }
         altPointer = bubblePointer = -1;
+        dragPointer = -1;
         alts = null;
         engine.reset();
         invalidate();

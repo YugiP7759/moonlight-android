@@ -25,7 +25,7 @@ import androidx.dynamicanimation.animation.SpringForce;
  * toolbar button and the keyboard's own hide key work any time. Without a caret from the server, the
  * place last touched stands in for it.
  */
-public final class YugiKeyboardHost implements YugiEvents.Listener, YugiKeyboard.Host {
+public final class YugiKeyboardHost implements YugiEvents.Listener, YugiKeyboard.Host, YugiKbdFocus.Owner {
     public interface StateListener { void onShown(boolean shown); }
 
     private static final float MARGIN_DP = 24;
@@ -37,6 +37,9 @@ public final class YugiKeyboardHost implements YugiEvents.Listener, YugiKeyboard
     private final YugiKeyEngine engine;
     private final YugiKeyboard kb;
     private final YugiEvents events;
+    private final YugiKeyEngine.Sender sender;
+    private final YugiVoice voice;
+    private YugiKbdSettingsView settingsView;
     private StateListener stateListener;
 
     private final FloatValueHolder revealValue = new FloatValueHolder(0f);
@@ -62,7 +65,9 @@ public final class YugiKeyboardHost implements YugiEvents.Listener, YugiKeyboard
         activity = a;
         desktop = desktopWrapper;
         stream = streamView;
+        this.sender = sender;
         engine = new YugiKeyEngine(sender);
+        voice = new YugiVoice(a);
         kb = new YugiKeyboard(a, engine, this);
         kb.setVisibility(View.GONE);
         a.addContentView(kb, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
@@ -102,6 +107,8 @@ public final class YugiKeyboardHost implements YugiEvents.Listener, YugiKeyboard
     public YugiEvents events() { return events; }
 
     public void stop() {
+        voice.cancel();
+        kb.setListening(false);
         events.stop();
         kb.removeCallbacks(autoHide);
     }
@@ -133,6 +140,7 @@ public final class YugiKeyboardHost implements YugiEvents.Listener, YugiKeyboard
             retargetShift();
             return;
         }
+        YugiKbdFocus.claim(this);
         wantShown = true;
         boolean wasHidden = kb.getVisibility() != View.VISIBLE;
         kb.setVisibility(View.VISIBLE);
@@ -154,8 +162,12 @@ public final class YugiKeyboardHost implements YugiEvents.Listener, YugiKeyboard
 
     public void hide() {
         kb.removeCallbacks(autoHide);
+        voice.cancel();
+        kb.setListening(false);
+        if (settingsView != null) { settingsView.close(); settingsView = null; }
         if (!wantShown) return;
         wantShown = false;
+        YugiKbdFocus.release(this);
         autoShown = false;
         kb.releaseAll();
         reveal.animateToFinalPosition(0f);
@@ -165,6 +177,44 @@ public final class YugiKeyboardHost implements YugiEvents.Listener, YugiKeyboard
     @Override public void onHideRequested() {
         userHidden = lastEditable;
         hide();
+    }
+
+    /** The in-app keyboard (chat) took the screen. */
+    @Override public void yieldKeyboard() {
+        autoShown = false;
+        hide();
+    }
+
+    @Override public void onGeometryChanged() {
+        if (!wantShown) return;
+        apply();
+        retargetShift();
+    }
+
+    @Override public void onSettingsRequested() {
+        if (settingsView != null && settingsView.getParent() != null) return;
+        settingsView = YugiKbdSettingsView.show(activity, kb, () -> settingsView = null);
+    }
+
+    /**
+     * Dictation to the desktop. Text sent to the server cannot be taken back, so the live words show
+     * above the keys and only the final result is typed (UTF-8, any language).
+     */
+    @Override public void onMicRequested(boolean hebrew) {
+        if (voice.isActive()) { voice.stop(); return; }
+        voice.start(hebrew, new YugiVoice.Listener() {
+            @Override public void onListening(boolean on) { kb.setListening(on); }
+            @Override public void onLevel(float level) { kb.setVoiceLevel(level); }
+            @Override public void onPartial(String text) { kb.setVoicePreview(text); }
+            @Override public void onFinal(String text) {
+                kb.setVoicePreview(null);
+                if (!text.isEmpty()) sender.text(text);
+            }
+            @Override public void onProblem(String message) {
+                kb.setListening(false);
+                android.widget.Toast.makeText(activity, message, android.widget.Toast.LENGTH_SHORT).show();
+            }
+        });
     }
 
     // ---------------------------------------------------------------- server events
@@ -184,7 +234,7 @@ public final class YugiKeyboardHost implements YugiEvents.Listener, YugiKeyboard
         if (userHidden && !replay && android.os.SystemClock.uptimeMillis() - lastTouchAt < TAP_TO_FOCUS_MS) userHidden = false;
         if (wantShown) {
             retargetShift();
-        } else if (!replay && !userHidden) {
+        } else if (!replay && !userHidden && !YugiKbdFocus.heldByOther(this)) {
             autoShown = true;
             show();
         }
@@ -223,7 +273,7 @@ public final class YugiKeyboardHost implements YugiEvents.Listener, YugiKeyboard
 
     private float kbPanelHeight() {
         kb.preferredHeight(rootWidth(), rootHeight()); // configures rows for this window
-        return kb.panelHeight();
+        return kb.pushHeight(); // 0 when floating: the desktop stays put
     }
 
     private void apply() {
