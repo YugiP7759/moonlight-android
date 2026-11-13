@@ -228,6 +228,10 @@ public class YugiChat extends FrameLayout {
         scroll = new ScrollView(ctx);
         scroll.setFillViewport(true);
         scroll.setVerticalScrollBarEnabled(false);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            scroll.setOnScrollChangeListener((v, x, y, ox, oy) ->
+                    stickToBottom = y >= list.getHeight() - scroll.getHeight() - dp(24));
+        }
         list = new LinearLayout(ctx);
         list.setOrientation(LinearLayout.VERTICAL);
         list.setPadding(dp(4), dp(8), dp(4), dp(8));
@@ -397,6 +401,11 @@ public class YugiChat extends FrameLayout {
         if (ime != imeInset || nav != navInset) {
             boolean wasShown = imeInset > 0;
             imeInset = ime;
+            if ((ime > 0) != compactAttachments) {
+                // Keyboard up: attachments shrink to a 40dp strip so the messages keep their room
+                compactAttachments = ime > 0;
+                renderPending();
+            }
             if (host != null && (ime > 0) != wasShown) host.onKeyboard(ime > 0 && open);
             navInset = nav;
             requestLayout();
@@ -417,7 +426,13 @@ public class YugiChat extends FrameLayout {
     protected void onLayout(boolean changed, int l, int t, int r, int b) {
         Rect c = cardRect(r - l, b - t);
         card.layout(c.left, c.top, c.right, c.bottom);
+        if (stickToBottom) {
+            // Newest messages stay in view when the card shrinks (keyboard) or grows
+            scroll.scrollTo(0, Math.max(0, list.getMeasuredHeight() - scroll.getHeight()));
+        }
     }
+
+    private boolean stickToBottom = true;
 
     /** Where the card goes: end side, below the toolbar, above the keyboard. */
     Rect cardRect(int w, int h) {
@@ -523,65 +538,131 @@ public class YugiChat extends FrameLayout {
         return t;
     }
 
-    /** Thumbnail (image) or file chip; with a remove button in the preview row. */
-    private View attachmentChip(Attachment a, boolean removable) {
+    /**
+     * Attachment views. In the message list: a framed thumbnail or a file chip.
+     * In the preview row: same, with a small remove button in the top corner, outside the content.
+     * Compact (keyboard open): 32dp items in a 40dp row, no remove button.
+     */
+    private View attachmentChip(Attachment a, boolean removable, boolean compact) {
         Context c = getContext();
+        int xs = dp(22);
         FrameLayout f = new FrameLayout(c);
-        View body;
+        View content;
         if (a.thumb != null) {
+            FrameLayout frame = new FrameLayout(c);
+            frame.setBackground(YugiTheme.roundedStroke(c, YugiTheme.SURFACE, YugiTheme.RADIUS_S, 0x40FFFFFF));
+            int pad = Math.max(1, dp(1));
+            frame.setPadding(pad, pad, pad, pad);
             ImageView iv = new ImageView(c);
             iv.setImageBitmap(a.thumb);
             iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
             iv.setClipToOutline(true);
-            iv.setBackground(YugiTheme.rounded(c, YugiTheme.SURFACE, YugiTheme.RADIUS_S));
-            body = iv;
-            f.addView(iv, new LayoutParams(dp(removable ? 64 : 160), dp(removable ? 64 : 100)));
+            iv.setBackground(YugiTheme.rounded(c, YugiTheme.SURFACE, YugiTheme.RADIUS_S - 1));
+            frame.addView(iv, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            int w = compact ? 32 : removable ? 56 : 160, h = compact ? 32 : removable ? 56 : 100;
+            content = frame;
+            f.addView(frame, new LayoutParams(dp(w), dp(h)));
         } else {
             LinearLayout chip = new LinearLayout(c);
             chip.setOrientation(LinearLayout.HORIZONTAL);
             chip.setGravity(Gravity.CENTER_VERTICAL);
-            chip.setBackground(YugiTheme.roundedStroke(c, YugiTheme.SURFACE, YugiTheme.RADIUS_S, YugiTheme.STROKE));
+            chip.setBackground(YugiTheme.roundedStroke(c, YugiTheme.SURFACE, YugiTheme.RADIUS_S, 0x40FFFFFF));
             chip.setPadding(dp(10), 0, dp(12), 0);
             ImageView ic = new ImageView(c);
             ic.setImageResource(R.drawable.yugi_ic_file);
             ic.setImageTintList(android.content.res.ColorStateList.valueOf(YugiTheme.TEXT_DIM));
-            chip.addView(ic, new LinearLayout.LayoutParams(dp(20), dp(20)));
+            ic.setTag("part");
+            chip.addView(ic, new LinearLayout.LayoutParams(dp(18), dp(18)));
             TextView name = YugiTheme.text(c, a.name, 13, 400, YugiTheme.TEXT);
             name.setPadding(dp(8), 0, 0, 0);
             name.setMaxLines(1);
-            name.setMinWidth(dp(40));
-            name.setMaxWidth(dp(160));
+            name.setMaxWidth(dp(compact ? 96 : 140));
             name.setEllipsize(android.text.TextUtils.TruncateAt.END);
             name.setTextDirection(TEXT_DIRECTION_FIRST_STRONG);
+            name.setTag("part");
             chip.addView(name, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            body = chip;
-            f.addView(chip, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(removable ? 64 : 44)));
+            content = chip;
+            f.addView(chip, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(compact ? 32 : removable ? 56 : 44)));
         }
-        if (removable) {
-            ImageButton x = YugiTheme.iconButton(c, R.drawable.yugi_ic_close, "הסר");
-            x.setScaleX(0.75f);
-            x.setScaleY(0.75f);
+        content.setTag("content");
+        if (removable && !compact) {
+            // Remove button in the corner gap (outside the content), with a 48dp touch area
+            f.setPadding(0, xs, xs, 0);
+            ImageButton x = new ImageButton(c);
+            x.setImageResource(R.drawable.yugi_ic_close);
+            x.setImageTintList(android.content.res.ColorStateList.valueOf(YugiTheme.TEXT));
+            x.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            x.setPadding(dp(4), dp(4), dp(4), dp(4));
             GradientDrawable xb = new GradientDrawable();
             xb.setShape(GradientDrawable.OVAL);
-            xb.setColor(0xCC000000);
+            xb.setColor(YugiTheme.SURFACE_HI);
+            xb.setStroke(Math.max(1, dp(1)), 0x40FFFFFF);
             x.setBackground(xb);
+            x.setContentDescription("הסר " + a.name);
+            x.setTag("x");
             x.setOnClickListener(v -> { pending.remove(a); renderPending(); });
-            LayoutParams xlp = new LayoutParams(dp(48), dp(48), Gravity.TOP | Gravity.END);
+            LayoutParams xlp = new LayoutParams(xs, xs, Gravity.TOP | Gravity.END);
+            xlp.topMargin = -xs; // into the padding gap above the content
+            xlp.rightMargin = -xs;
+            f.setClipToPadding(false);
             f.addView(x, xlp);
-            f.setPadding(0, 0, 0, 0);
+            f.post(() -> {
+                Rect hit = new Rect();
+                x.getHitRect(hit);
+                int grow = (dp(48) - xs) / 2;
+                hit.inset(-grow, -grow);
+                f.setTouchDelegate(new android.view.TouchDelegate(hit, x));
+            });
         }
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.bottomMargin = dp(6);
+        lp.bottomMargin = dp(compact ? 4 : 6);
         lp.setMarginEnd(dp(8));
         f.setLayoutParams(lp);
         return f;
     }
 
+    private View attachmentChip(Attachment a, boolean removable) { return attachmentChip(a, removable, false); }
+
+    private boolean compactAttachments;
+
     private void renderPending() {
         attachRow.removeAllViews();
-        for (Attachment a : pending) attachRow.addView(attachmentChip(a, true));
+        for (Attachment a : pending) attachRow.addView(attachmentChip(a, true, compactAttachments));
         attachScroll.setVisibility(pending.isEmpty() ? GONE : VISIBLE);
         updateSendButton();
+    }
+
+    /** For checks: the remove button must not overlap the chip's content (icon, name or image). */
+    List<String> chipProblems() {
+        List<String> out = new ArrayList<>();
+        for (int i = 0; i < attachRow.getChildCount(); i++) {
+            ViewGroup f = (ViewGroup) attachRow.getChildAt(i);
+            View x = f.findViewWithTag("x");
+            View content = f.findViewWithTag("content");
+            if (x == null || content == null) continue;
+            Rect xr = new Rect(x.getLeft(), x.getTop(), x.getRight(), x.getBottom());
+            Rect cr = new Rect(content.getLeft(), content.getTop(), content.getRight(), content.getBottom());
+            if (Rect.intersects(xr, cr)) out.add("chip " + i + ": remove button " + xr.toShortString() + " overlaps content " + cr.toShortString());
+            if (content instanceof ViewGroup) {
+                ViewGroup g = (ViewGroup) content;
+                for (int k = 0; k < g.getChildCount(); k++) {
+                    View p = g.getChildAt(k);
+                    if (!"part".equals(p.getTag())) continue;
+                    if (p.getWidth() <= 0 || p.getHeight() <= 0) out.add("chip " + i + ": part " + k + " has no size");
+                }
+            }
+        }
+        return out;
+    }
+
+    /** Messages fully visible in the list right now. */
+    int visibleMessageCount() {
+        int top = scroll.getScrollY(), bottom = top + scroll.getHeight(), n = 0;
+        for (int i = 0; i < list.getChildCount(); i++) {
+            View v = list.getChildAt(i);
+            if (v.getHeight() > 0 && v.getTop() >= top && v.getBottom() <= bottom) n++;
+        }
+        return n;
     }
 
     private void updateSendButton() {

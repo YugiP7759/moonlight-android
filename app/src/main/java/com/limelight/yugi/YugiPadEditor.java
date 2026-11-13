@@ -95,15 +95,14 @@ public class YugiPadEditor extends FrameLayout {
         card.addView(head);
         SeekBar sb = new SeekBar(c);
         sb.setMax(max - min);
-        sb.setProgressTintList(ColorStateList.valueOf(YugiTheme.ACCENT));
-        sb.setThumbTintList(ColorStateList.valueOf(YugiTheme.TEXT));
+        YugiTheme.styleSlider(sb);
         sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar s, int p, boolean fromUser) { if (fromUser) setter.set(p + min); }
             @Override public void onStartTrackingTouch(SeekBar s) {}
             @Override public void onStopTrackingTouch(SeekBar s) {}
         });
         sb.setTag(min);
-        card.addView(sb, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
+        card.addView(sb, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)));
         return sb;
     }
 
@@ -112,16 +111,19 @@ public class YugiPadEditor extends FrameLayout {
         boolean has = c != null;
         size.setEnabled(has);
         alpha.setEnabled(has);
-        size.setAlpha(has ? 1f : 0.4f);
-        alpha.setAlpha(has ? 1f : 0.4f);
+        size.setAlpha(has ? 1f : 0.3f);
+        alpha.setAlpha(has ? 1f : 0.3f);
+        hint.setText(has ? "גרור כדי להזיז. שנה גודל ושקיפות כאן."
+                : "בחר כפתור כדי לשנות את הגודל והשקיפות שלו. אפשר לגרור כל כפתור.");
+        hint.setTextColor(has ? YugiTheme.TEXT_DIM : YugiTheme.ACCENT);
         if (has) {
             size.setProgress(Math.round(c.sizeDp) - 30);
             alpha.setProgress(Math.round(c.alpha * 100) - 10);
             sizeVal.setText(Math.round(c.sizeDp) + "dp");
             alphaVal.setText(Math.round(c.alpha * 100) + "%");
         } else {
-            sizeVal.setText("");
-            alphaVal.setText("");
+            sizeVal.setText("–");
+            alphaVal.setText("–");
         }
         boolean bottom = has && selectedCenterY >= 0 && selectedCenterY < screenH / 2f;
         if (bottom != atBottom) {

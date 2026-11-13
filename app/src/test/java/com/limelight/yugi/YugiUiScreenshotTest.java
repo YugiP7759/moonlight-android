@@ -189,6 +189,9 @@ public class YugiUiScreenshotTest {
         Rect card = chat.cardRect();
         Rect input = chat.inputRect();
         checkInside(what + " card", List.of(card), w, h - ime, problems);
+        int visible = chat.visibleMessageCount();
+        if (visible < (ime > 0 ? 1 : 2)) problems.add(what + ": only " + visible + " message(s) fully visible");
+        for (String p : chat.chipProblems()) problems.add(what + ": " + p);
         checkInside(what + " input", List.of(input), w, h - ime, problems);
         if (input.height() < 40) problems.add(what + ": input too small " + input);
         checkNoOverlap(what, List.of(card), "chrome", chrome.visibleRects(), problems);

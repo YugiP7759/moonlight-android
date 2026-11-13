@@ -67,7 +67,7 @@ public final class YugiNav {
     public static FrameLayout buildPanel(Activity a, List<Item> items, int topPx, Runnable onClose) {
         int m = YugiTheme.dp(a, 12);
         FrameLayout scrim = new FrameLayout(a);
-        scrim.setBackgroundColor(0x4D000000);
+        scrim.setBackgroundColor(0xB3000000); // dark: the pad behind never mixes with the menu
         scrim.setLayoutDirection(View.LAYOUT_DIRECTION_LTR); // panel on the right; its content is RTL
         scrim.setClickable(true);
 
@@ -81,6 +81,10 @@ public final class YugiNav {
         sv.setElevation(YugiTheme.dp(a, 12));
         sv.setClickable(true);
         sv.addView(panel);
+        sv.setVerticalFadingEdgeEnabled(true);
+        sv.setFadingEdgeLength(YugiTheme.dp(a, 40));
+        sv.setVerticalScrollBarEnabled(true);
+        sv.setScrollbarFadingEnabled(false);
 
         Runnable close = () -> sv.animate().alpha(0f).setDuration(120).withEndAction(() -> {
             ViewGroup p = (ViewGroup) scrim.getParent();

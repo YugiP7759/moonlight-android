@@ -114,6 +114,41 @@ public final class YugiTheme {
         v.setImageTintList(ColorStateList.valueOf(active ? ACCENT : TEXT));
     }
 
+    /** High-contrast slider: 6dp rounded track, accent fill, 24dp white thumb. */
+    public static void styleSlider(android.widget.SeekBar sb) {
+        Context c = sb.getContext();
+        float r = dp(c, 3);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0x4DFFFFFF);
+        bg.setCornerRadius(r);
+        GradientDrawable fg = new GradientDrawable();
+        fg.setColor(ACCENT);
+        fg.setCornerRadius(r);
+        android.graphics.drawable.ClipDrawable clip =
+                new android.graphics.drawable.ClipDrawable(fg, android.view.Gravity.START, android.graphics.drawable.ClipDrawable.HORIZONTAL);
+        android.graphics.drawable.LayerDrawable layers =
+                new android.graphics.drawable.LayerDrawable(new Drawable[]{bg, clip});
+        layers.setId(0, android.R.id.background);
+        layers.setId(1, android.R.id.progress);
+        int h = dp(c, 6);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            layers.setLayerHeight(0, h);
+            layers.setLayerHeight(1, h);
+            layers.setLayerGravity(0, android.view.Gravity.CENTER_VERTICAL);
+            layers.setLayerGravity(1, android.view.Gravity.CENTER_VERTICAL);
+        }
+        sb.setProgressDrawable(layers);
+        GradientDrawable thumb = new GradientDrawable();
+        thumb.setShape(GradientDrawable.OVAL);
+        thumb.setColor(TEXT);
+        thumb.setStroke(dp(c, 2), ACCENT);
+        thumb.setSize(dp(c, 24), dp(c, 24));
+        sb.setThumb(thumb);
+        sb.setThumbOffset(dp(c, 12));
+        sb.setPadding(dp(c, 14), 0, dp(c, 14), 0);
+        sb.setSplitTrack(false);
+    }
+
     public static TextView text(Context c, String s, float sp, int weight, int color) {
         TextView t = new TextView(c);
         t.setText(s);

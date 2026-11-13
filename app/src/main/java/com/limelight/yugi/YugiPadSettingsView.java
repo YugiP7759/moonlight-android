@@ -28,7 +28,7 @@ public class YugiPadSettingsView extends FrameLayout {
         super(ctx);
         s = settings;
         listener = l;
-        setBackgroundColor(0x66000000);
+        setBackgroundColor(0xB3000000); // dark scrim: the pad behind never mixes with the sheet
         setClickable(true); // modal
         setOnClickListener(v -> close());
 
@@ -42,6 +42,10 @@ public class YugiPadSettingsView extends FrameLayout {
         sv.setBackground(YugiTheme.roundedStroke(ctx, YugiTheme.GLASS_STRONG, YugiTheme.RADIUS_L, YugiTheme.STROKE));
         sv.setElevation(dp(12));
         sv.addView(card);
+        sv.setVerticalFadingEdgeEnabled(true);
+        sv.setFadingEdgeLength(dp(40));
+        sv.setVerticalScrollBarEnabled(true);
+        sv.setScrollbarFadingEnabled(false);
         addView(sv);
 
         card.addView(YugiTheme.text(ctx, "הגדרות שלט", 18, 600, YugiTheme.TEXT));
@@ -95,8 +99,7 @@ public class YugiPadSettingsView extends FrameLayout {
         SeekBar sb = new SeekBar(c);
         sb.setMax(max - min);
         sb.setProgress(value - min);
-        sb.setProgressTintList(ColorStateList.valueOf(YugiTheme.ACCENT));
-        sb.setThumbTintList(ColorStateList.valueOf(YugiTheme.TEXT));
+        YugiTheme.styleSlider(sb);
         sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar b, int p, boolean u) {
                 setter.set(p + min);
@@ -106,7 +109,7 @@ public class YugiPadSettingsView extends FrameLayout {
             @Override public void onStartTrackingTouch(SeekBar b) {}
             @Override public void onStopTrackingTouch(SeekBar b) {}
         });
-        card.addView(sb, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
+        card.addView(sb, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)));
     }
 
     private void toggle(String label, boolean value, BoolSetter setter) {
