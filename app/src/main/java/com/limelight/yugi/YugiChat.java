@@ -550,8 +550,9 @@ public class YugiChat extends FrameLayout {
             name.setPadding(dp(8), 0, 0, 0);
             name.setSingleLine(true);
             name.setMaxWidth(dp(160));
-            name.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
-            chip.addView(name);
+            name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            name.setTextDirection(TEXT_DIRECTION_FIRST_STRONG);
+            chip.addView(name, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             body = chip;
             f.addView(chip, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(removable ? 64 : 44)));
         }
@@ -684,6 +685,8 @@ public class YugiChat extends FrameLayout {
         pending.add(new Attachment(name, mime, data, thumb));
         renderPending();
     }
+
+    static void clearPendingForTest() { pending.clear(); }
 
     /** For previews/tests: replace the conversation. */
     static void setMessagesForTest(List<Msg> ms) {

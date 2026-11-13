@@ -156,6 +156,7 @@ public class YugiUiScreenshotTest {
         m3.attachments.add(new YugiChat.Attachment("logo.png", "image/png", new byte[0], thumb(a)));
         YugiChat.Msg m4 = new YugiChat.Msg("assistant", "הוספתי את הלוגו ואת שני הסעיפים. הקובץ שמור ב-Drive.");
         YugiChat.setMessagesForTest(Arrays.asList(m1, m2, m3, m4));
+        YugiChat.clearPendingForTest();
         YugiChat chat = new YugiChat(a, new YugiChat.Host() {
             @Override public void captureScreen(YugiChat.BitmapCallback cb) { cb.onBitmap(null); }
             @Override public void pickFile() {}
