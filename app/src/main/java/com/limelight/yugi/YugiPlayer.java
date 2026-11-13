@@ -194,6 +194,10 @@ public final class YugiPlayer {
     private final ImageView hero;
     private final FrameLayout content;
     private final View closeBtn;
+    private final FrameLayout closeWrap; // flight fade (applyGeometry); closeBtn itself fades with the controls
+    private boolean closeShown;
+    private int safeLeft, safeTop, safeRight;
+    private final Runnable hideClose = () -> setCloseShown(false);
     private final Controls controls;
 
     private Request req;
@@ -254,9 +258,28 @@ public final class YugiPlayer {
         closeBtn.setContentDescription("סגירה");
         closeBtn.setOnClickListener(v -> close());
         int touch = YugiTheme.dp(a, YugiTheme.TOUCH);
-        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(touch, touch, Gravity.TOP | Gravity.START);
-        clp.topMargin = clp.leftMargin = clp.rightMargin = YugiTheme.dp(a, 12);
-        layer.addView(closeBtn, clp);
+        // always above the video (WebView / texture); in a corner kept free of YouTube's title and controls
+        closeWrap = new FrameLayout(a);
+        closeWrap.addView(closeBtn, new FrameLayout.LayoutParams(touch, touch));
+        closeBtn.setVisibility(View.GONE);
+        layer.addView(closeWrap, new FrameLayout.LayoutParams(touch, touch, Gravity.TOP | Gravity.START));
+        placeClose();
+        layer.setOnApplyWindowInsetsListener((v, ins) -> {
+            // safe area: system bars and the camera cutout
+            int l = ins.getSystemWindowInsetLeft(), t = ins.getSystemWindowInsetTop(), r = ins.getSystemWindowInsetRight();
+            if (Build.VERSION.SDK_INT >= 28 && ins.getDisplayCutout() != null) {
+                l = Math.max(l, ins.getDisplayCutout().getSafeInsetLeft());
+                t = Math.max(t, ins.getDisplayCutout().getSafeInsetTop());
+                r = Math.max(r, ins.getDisplayCutout().getSafeInsetRight());
+            }
+            if (l != safeLeft || t != safeTop || r != safeRight) {
+                safeLeft = l; safeTop = t; safeRight = r;
+                placeClose();
+                layoutTexture();
+                applyGeometry();
+            }
+            return ins;
+        });
 
         progressSpring = new SpringAnimation(this, PROGRESS);
         progressSpring.setSpring(new SpringForce().setStiffness(STIFFNESS).setDampingRatio(DAMPING));
@@ -271,6 +294,7 @@ public final class YugiPlayer {
             if ((r - l) != (or - ol) || (b - t) != (ob - ot)) {
                 // fold / rotate: the player stays, only its geometry follows the new window
                 source = computeSource();
+                layoutTexture();
                 applyGeometry();
             }
         });
@@ -367,7 +391,53 @@ public final class YugiPlayer {
     // ---------------------------------------------------------------- geometry
 
     private RectF fullVideo() {
-        return fit(aspect, Math.max(1, layer.getWidth()), Math.max(1, layer.getHeight()));
+        float w = Math.max(1, layer.getWidth()), h = Math.max(1, layer.getHeight());
+        // the YouTube embed draws its title and controls over its own box: keep the close corner outside it
+        if (req != null && "youtube".equals(req.kind) && !ytFallback) return fitClearOfCorner(aspect, w, h, closeBand());
+        return fit(aspect, w, h);
+    }
+
+    /** Space the close button needs from the top / side edge (margin + 48dp + gap, plus the safe inset). */
+    private float closeBand() {
+        return YugiTheme.dp(activity, 12 + YugiTheme.TOUCH + 8) + Math.max(safeTop, Math.max(safeLeft, safeRight));
+    }
+
+    /**
+     * Like {@link #fit}, but when the video would cover the top corners, shrinks it so a band of {@code band}
+     * stays free at the sides (landscape) or above and below it (portrait).
+     */
+    static RectF fitClearOfCorner(float aspect, float w, float h, float band) {
+        RectF r = fit(aspect, w, h);
+        if (r.left >= band || r.top >= band) return r;
+        if (w >= h) { r = fit(aspect, Math.max(1, w - 2 * band), h); r.offset(band, 0); }
+        else { r = fit(aspect, w, Math.max(1, h - 2 * band)); r.offset(0, band); }
+        return r;
+    }
+
+    private void placeClose() {
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) closeWrap.getLayoutParams();
+        int m = YugiTheme.dp(activity, 12);
+        lp.topMargin = m + safeTop;
+        lp.leftMargin = m + safeLeft;
+        lp.rightMargin = m + safeRight;
+        if (Build.VERSION.SDK_INT >= 17) { lp.setMarginStart(lp.leftMargin); lp.setMarginEnd(lp.rightMargin); }
+        closeWrap.setLayoutParams(lp);
+    }
+
+    /** The close button shows with the controls and fades after a few seconds; any touch brings it back. */
+    private void setCloseShown(boolean on) {
+        ui.removeCallbacks(hideClose);
+        if (on) ui.postDelayed(hideClose, 3500);
+        if (on == closeShown) return;
+        closeShown = on;
+        closeBtn.animate().cancel();
+        if (on) {
+            if (closeBtn.getVisibility() != View.VISIBLE) { closeBtn.setAlpha(0f); closeBtn.setVisibility(View.VISIBLE); }
+            closeBtn.animate().alpha(1f).setDuration(180).start();
+        } else {
+            closeBtn.animate().alpha(0f).setDuration(220)
+                    .withEndAction(() -> { if (!closeShown) closeBtn.setVisibility(View.GONE); }).start();
+        }
     }
 
     /** The visible part of the card, in the card's own (unscaled) coordinates. */
@@ -410,8 +480,8 @@ public final class YugiPlayer {
         float dragFade = 1f - Math.min(1f, d / (h * 0.6f));
         scrim.setAlpha(Math.max(0f, Math.min(1f, progress)) * dragFade);
         float chrome = Math.max(0f, (progress - 0.85f) / 0.15f) * dragFade;
-        closeBtn.setAlpha(chrome);
-        closeBtn.setVisibility(chrome > 0.02f ? View.VISIBLE : View.INVISIBLE);
+        closeWrap.setAlpha(chrome);
+        closeWrap.setVisibility(chrome > 0.02f ? View.VISIBLE : View.INVISIBLE);
     }
 
     /** Without a source rect: start from a small centered copy (still a spring, never a cut). */
@@ -447,6 +517,7 @@ public final class YugiPlayer {
     private void onFirstFrame() {
         if (firstFrame || req == null) return;
         firstFrame = true;
+        setCloseShown(true);
         content.animate().alpha(1f).setDuration(CROSSFADE_MS).start();
         hero.animate().alpha(0f).setDuration(CROSSFADE_MS).setStartDelay(40).start();
         YugiEvents.postMediaState(req.id, "playing", currentTime(), null);
@@ -493,6 +564,14 @@ public final class YugiPlayer {
     }
 
     private void layoutTexture() {
+        if (web != null) {
+            // the embed gets exactly the video box (its own title / controls stay inside it); the watch page is full
+            RectF v = fullVideo();
+            FrameLayout.LayoutParams wl = ytFallback ? match()
+                    : new FrameLayout.LayoutParams(Math.round(v.width()), Math.round(v.height()), Gravity.TOP | Gravity.LEFT);
+            if (!ytFallback) { wl.leftMargin = Math.round(v.left); wl.topMargin = Math.round(v.top); }
+            web.setLayoutParams(wl);
+        }
         if (texture == null) return;
         RectF v = fullVideo();
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(Math.round(v.width()), Math.round(v.height()),
@@ -533,6 +612,7 @@ public final class YugiPlayer {
         } else {
             web.loadDataWithBaseURL(YT_BASE, youtubeHtml(req.vid, req.t), "text/html", "utf-8", null);
         }
+        layoutTexture();
     }
 
     /** Calls from the YouTube page (JS thread -> UI thread). */
@@ -610,6 +690,7 @@ public final class YugiPlayer {
         closing = true;
         if (exo != null) exo.pause();
         controls.hide(true);
+        setCloseShown(false);
         // the hero goes back over the player so the flight ends on the desktop frame
         hero.animate().cancel();
         hero.setAlpha(hero.getDrawable() != null ? 1f : 0f);
@@ -682,6 +763,7 @@ public final class YugiPlayer {
             if (req == null) return false;
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
+                    if (!closing) setCloseShown(true); // any touch brings the close button back
                     downX = e.getX(); downY = lastY = e.getY();
                     dragging = false;
                     if (progressSpring.isRunning() || dragSpring.isRunning()) {

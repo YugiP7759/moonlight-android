@@ -152,4 +152,19 @@ public class YugiPlayerTest {
         }
         return b;
     }
+
+    @Test
+    public void youtubeBoxLeavesTheCloseCornerFree() {
+        float band = 180;
+        // Fold cover landscape (21:9): the pillarbox already frees the corner, nothing shrinks
+        RectF cover = YugiPlayer.fitClearOfCorner(16f / 9f, 2520, 1080, band);
+        assertEquals(YugiPlayer.fit(16f / 9f, 2520, 1080), cover);
+        // a 16:9 screen: the video shrinks so the side bands hold the button, and stays centred
+        RectF exact = YugiPlayer.fitClearOfCorner(16f / 9f, 1920, 1080, band);
+        assertTrue(exact.left >= band - 0.5f && exact.right <= 1920 - band + 0.5f);
+        assertEquals(960, exact.centerX(), 0.5f);
+        // portrait: the band above the video is free
+        RectF port = YugiPlayer.fitClearOfCorner(16f / 9f, 1080, 2400, band);
+        assertTrue(port.top >= band);
+    }
 }
