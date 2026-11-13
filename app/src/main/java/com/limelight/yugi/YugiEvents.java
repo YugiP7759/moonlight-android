@@ -90,7 +90,7 @@ public final class YugiEvents {
     }
 
     private String url() {
-        return base() + "/events";
+        return base() + "/events?role=phone"; // role=phone: this app can take media (hybrid stage 2)
     }
 
     static String base() {
