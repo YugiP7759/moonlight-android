@@ -12,7 +12,7 @@ android {
         targetSdk 34
 
         versionName "20.2.6"
-        versionCode = 57
+        versionCode = 58
 
         // YugiPC: build-time secrets (never committed; injected by CI from GitHub secrets)
         buildConfigField "String", "SUNSHINE_USER", "\"${System.getenv('SUNSHINE_USER') ?: ''}\""

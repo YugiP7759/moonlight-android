@@ -576,6 +576,8 @@ public class YugiChat extends FrameLayout {
             if (compactAttachments != tight()) { compactAttachments = tight(); renderPending(); }
             scrollToEnd();
             requestApplyInsets();
+            // typing goes to the chat at once: the field takes the focus and its keyboard comes up
+            if (sessions.getVisibility() != VISIBLE) post(this::focusInput);
         } else {
             hideKeyboard();
             sessions.setShown(false);
@@ -584,6 +586,12 @@ public class YugiChat extends FrameLayout {
             if (tts != null) tts.stop();
             card.animate().alpha(0f).setDuration(120).withEndAction(() -> setVisibility(GONE)).start();
         }
+    }
+
+    private void focusInput() {
+        if (!open || sessions.getVisibility() == VISIBLE) return;
+        input.requestFocus();
+        if (fieldKb != null) fieldKb.show(input);
     }
 
     private void hideKeyboard() {

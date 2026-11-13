@@ -2146,6 +2146,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             if (event.getRepeatCount() == 0) yugiPlayer.close();
             return true;
         }
+        if (yugiAppFieldFocused()) return super.onKeyDown(keyCode, event); // keys the chat field left over stay off the desktop
         return handleKeyDown(event) || super.onKeyDown(keyCode, event);
     }
 
@@ -2238,7 +2239,13 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_BACK && yugiPlayer != null && yugiPlayer.isOpen()) return true;
+        if (yugiAppFieldFocused()) return super.onKeyUp(keyCode, event);
         return handleKeyUp(event) || super.onKeyUp(keyCode, event);
+    }
+
+    /** YugiPC: an in-app text field (the Yugi chat) has the focus, so typing is not for the desktop. */
+    private boolean yugiAppFieldFocused() {
+        return yugi && getCurrentFocus() instanceof android.widget.EditText;
     }
 
     @Override
@@ -3544,6 +3551,12 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             //
             // NB: This is still needed even when we call the newer requestUnbufferedDispatch()!
             view.requestUnbufferedDispatch(event);
+            if (yugiAppFieldFocused()) {
+                // a touch on the desktop takes the typing back from an in-app field (the Yugi chat):
+                // its keyboard goes down and the stream gets the focus again
+                if (yugiChat != null && yugiChat.fieldKeyboard() != null) yugiChat.fieldKeyboard().hide();
+                streamContainer.requestFocus();
+            }
             if (yugiKeys != null) {
                 // where the user last touched the desktop: the keyboard's fallback caret
                 yugiKeys.noteTouch(view == streamContainer ? event.getY()
@@ -3603,6 +3616,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             yugiOverlay.setKeyboardAction(yugiKeys::toggle);
             yugiKeys.setStateListener(yugiOverlay::setKeyboardActive);
         }
+        // an in-app field (the Yugi chat) with the focus takes the typing; the desktop keyboard stays down
+        getWindow().getDecorView().getViewTreeObserver().addOnGlobalFocusChangeListener((oldFocus, newFocus) -> {
+            if (yugiKeys != null) yugiKeys.setAppFieldFocused(newFocus instanceof android.widget.EditText);
+        });
         yugiAttachPlayer();
         yugiKeys.start();
     }

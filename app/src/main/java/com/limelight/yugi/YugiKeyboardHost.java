@@ -51,6 +51,7 @@ public final class YugiKeyboardHost implements YugiEvents.Listener, YugiKeyboard
     private boolean autoShown;         // opened by focus (closes by focus too)
     private boolean userHidden;        // closed by hand while focus stayed in the field
     private boolean lastEditable;
+    private boolean appFieldFocused;   // an in-app text field (chat) takes the typing
     private YugiEvents.Caret caret;    // last caret with a rect
     private float lastTouchY = Float.NaN; // stream-local
     private long lastTouchAt = Long.MIN_VALUE / 4; // uptime ms (none yet)
@@ -174,6 +175,16 @@ public final class YugiKeyboardHost implements YugiEvents.Listener, YugiKeyboard
         if (stateListener != null) stateListener.onShown(false);
     }
 
+    /**
+     * A text field of the app itself (the Yugi chat) has the focus: typing belongs to it, so this
+     * keyboard (which always types into the desktop) goes down and the server caret does not bring it back.
+     */
+    public void setAppFieldFocused(boolean focused) {
+        if (focused == appFieldFocused) return;
+        appFieldFocused = focused;
+        if (focused) hide();
+    }
+
     @Override public void onHideRequested() {
         userHidden = lastEditable;
         hide();
@@ -236,7 +247,7 @@ public final class YugiKeyboardHost implements YugiEvents.Listener, YugiKeyboard
         if (userHidden && !replay && android.os.SystemClock.uptimeMillis() - lastTouchAt < TAP_TO_FOCUS_MS) userHidden = false;
         if (wantShown) {
             retargetShift();
-        } else if (!replay && !userHidden && !YugiKbdFocus.heldByOther(this)) {
+        } else if (!replay && !userHidden && !appFieldFocused && !YugiKbdFocus.heldByOther(this)) {
             autoShown = true;
             show();
         }
