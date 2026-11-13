@@ -11,6 +11,8 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
+        <!-- YugiPC Games (local Steam engine): "בטלפון" in the games menu -->
+        <package android:name="com.yugi.pc.games" />
     </queries>
     <!-- YugiPC: implicit permissions added by old libraries; not needed (Play Protect) -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" tools:node="remove" />

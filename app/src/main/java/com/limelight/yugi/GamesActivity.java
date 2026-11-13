@@ -322,6 +322,9 @@ public class GamesActivity extends Activity {
         List<YugiNav.Item> items = new ArrayList<>();
         items.add(new YugiNav.Item("המחשב שלי", false, () -> YugiNav.openPc(this)));
         items.add(new YugiNav.Item("משחקים", true, null));
+        items.add(YugiNav.Item.section("מקור"));
+        items.add(new YugiNav.Item("Boosteroid (ענן)", true, null));
+        items.add(new YugiNav.Item("בטלפון (Steam)", false, () -> YugiNav.openPhoneGames(this)));
         items.add(YugiNav.Item.section("תצוגה"));
         items.add(new YugiNav.Item("תמונה: " + FIT_NAMES[fi], false, this::cycleFit));
         items.add(new YugiNav.Item(force169 ? "רזולוציה: 16:9 (\u20661920×1080\u2069)" : "רזולוציה: לפי המסך", false, this::toggle169));
