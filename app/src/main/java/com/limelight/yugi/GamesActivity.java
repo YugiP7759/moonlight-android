@@ -75,6 +75,8 @@ public class GamesActivity extends Activity {
     private int imeInset;
     /** Page the WebView showed when the screen went to the background (blanked so Boosteroid's stream stops). */
     private String stoppedUrl;
+    /** The chat's file picker is up: a short trip, the game and the chat stay as they are. */
+    private boolean pickingFile;
 
     private final Runnable statsTick = new Runnable() {
         @Override
@@ -309,7 +311,7 @@ public class GamesActivity extends Activity {
 
         chat = YugiChat.attach(this, new YugiChat.Host() {
             @Override public void captureScreen(YugiChat.BitmapCallback cb) { snapshot(cb); }
-            @Override public void pickFile() { YugiChat.openPicker(GamesActivity.this); }
+            @Override public void pickFile() { pickingFile = true; YugiChat.openPicker(GamesActivity.this); }
             @Override public int reservedTop() { return chrome.getReservedTop(); }
             @Override public void onKeyboard(boolean shown) { chrome.setChromeVisible(!shown); }
         });
@@ -494,6 +496,7 @@ public class GamesActivity extends Activity {
     @Override
     protected void onStart() {
         super.onStart();
+        pickingFile = false;
         // Back from the background: bring back the page that was blanked in onStop
         if (stoppedUrl != null) {
             String u = stoppedUrl;
@@ -505,6 +508,7 @@ public class GamesActivity extends Activity {
     @Override
     protected void onStop() {
         super.onStop();
+        if (pickingFile) return;
         // Out of sight (the PC screen, home, screen off): nothing keeps streaming or polling behind it.
         // REORDER_TO_FRONT keeps this activity alive, so Boosteroid's page is blanked rather than paused.
         if (chat != null && chat.isOpen()) chat.setOpen(false);
