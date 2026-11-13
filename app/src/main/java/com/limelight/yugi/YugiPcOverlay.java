@@ -26,7 +26,10 @@ public final class YugiPcOverlay {
     public static YugiPcOverlay attach(Activity a, SurfaceView surface, Runnable openGames) {
         YugiPcOverlay o = new YugiPcOverlay();
         List<YugiChrome.Button> buttons = new ArrayList<>();
-        // יוגי: the draggable floating bubble (YugiChatBubble), not a toolbar button
+        // יוגי: the chrome's primary orb (one floating control); the chat grows out of it
+        YugiChrome.Button yugi = new YugiChrome.Button(R.drawable.yugi_ic_yugi, "יוגי", () -> {
+            if (o.chat != null) o.chat.toggle();
+        });
         o.keyboardButton = new YugiChrome.Button(R.drawable.yugi_ic_keyboard, "מקלדת", () -> {
             if (o.keyboardAction != null) o.keyboardAction.run();
         });
@@ -45,7 +48,7 @@ public final class YugiPcOverlay {
                 YugiNav.showPanel(a, Arrays.asList(
                         new YugiNav.Item("המחשב שלי", true, null),
                         new YugiNav.Item("משחקים", false, openGames)), o.chrome.getReservedTop())));
-        o.chrome = YugiChrome.attach(a, buttons);
+        o.chrome = YugiChrome.attach(a, buttons, YugiChat.isChatEnabled() ? yugi : null);
         if (mic[0] != null) {
             YugiMedia.Listener ml = (micOn, camOn) -> {
                 mic[0].setIcon(micOn ? R.drawable.yugi_ic_mic : R.drawable.yugi_ic_mic_off);
@@ -65,6 +68,9 @@ public final class YugiPcOverlay {
             @Override public void pickFile() { YugiChat.openPicker(a); }
             @Override public int reservedTop() { return o.chrome.getReservedTop(); }
             @Override public void onKeyboard(boolean shown) { o.chrome.setChromeVisible(!shown); }
+            @Override public android.graphics.Rect anchorRect() { return o.chrome.primaryRectInWindow(); }
+            @Override public boolean anchorRight() { return o.chrome.isDockedRight(); }
+            @Override public void onChatOpen(boolean open) { o.chrome.setChatOpen(open); }
         });
         return o;
     }

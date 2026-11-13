@@ -74,10 +74,10 @@ public class YugiUiScreenshotTest {
         YugiChrome.Button padBtn = new YugiChrome.Button(R.drawable.yugi_ic_gamepad, "שלט", () -> {});
         padBtn.active = true;
         YugiChrome chrome = new YugiChrome(a, Arrays.asList(
-                new YugiChrome.Button(R.drawable.yugi_ic_yugi, "יוגי", () -> {}),
                 padBtn,
                 new YugiChrome.Button(R.drawable.yugi_ic_edit, "עריכה", () -> {}),
-                new YugiChrome.Button(R.drawable.yugi_ic_menu, "תפריט", () -> {})));
+                new YugiChrome.Button(R.drawable.yugi_ic_menu, "תפריט", () -> {})),
+                new YugiChrome.Button(R.drawable.yugi_ic_yugi, "יוגי", () -> {}));
         chrome.setHudVisible(true);
         chrome.setStats(60, 98, 1920, 1080);
         games.addView(chrome, match());
@@ -141,48 +141,116 @@ public class YugiUiScreenshotTest {
         checkInside("settings", List.of(settings.cardRect()), w, h, problems);
         save(games, name + "-d-pad-settings");
 
-        // ---- desktop: toolbar + chat, without and with the keyboard
+        // ---- desktop: the one floating control (toolbar + Yugi orb), expanded and collapsed
+        YugiMessages.offline = true;
+        YugiSessions.Hidden.clear(a);
+        a.getSharedPreferences("yugi_chrome", Context.MODE_PRIVATE).edit().clear().commit();
         FrameLayout pc = screen(a, "pc");
+        final YugiChat[] chatRef = new YugiChat[1];
         YugiChrome pcChrome = new YugiChrome(a, Arrays.asList(
-                new YugiChrome.Button(R.drawable.yugi_ic_yugi, "יוגי", () -> {}),
+                new YugiChrome.Button(R.drawable.yugi_ic_keyboard, "מקלדת", () -> {}),
                 new YugiChrome.Button(R.drawable.yugi_ic_mic, "מיקרופון", () -> {}),
                 new YugiChrome.Button(R.drawable.yugi_ic_videocam, "מצלמה", () -> {}),
                 new YugiChrome.Button(R.drawable.yugi_ic_switch_camera, "החלפת מצלמה", () -> {}),
-                new YugiChrome.Button(R.drawable.yugi_ic_menu, "תפריט", () -> {})));
+                new YugiChrome.Button(R.drawable.yugi_ic_menu, "תפריט", () -> {})),
+                new YugiChrome.Button(R.drawable.yugi_ic_yugi, "יוגי", () -> chatRef[0].toggle()));
+        pcChrome.setAutoHide(false);
+        pcChrome.setHudVisible(true);
+        pcChrome.setStats(60, 41, 1920, 1080);
         pc.addView(pcChrome, match());
-        YugiChat.Msg m1 = new YugiChat.Msg("user", "תפתח לי את הקובץ של ההצעה ללקוח ותסכם מה חסר");
-        YugiChat.Msg m2 = new YugiChat.Msg("assistant", "פתחתי את ההצעה. חסרים שני דברים: לוח זמנים לתשלום ופרטי איש קשר. להוסיף אותם עכשיו?");
-        YugiChat.Msg m3 = new YugiChat.Msg("user", "כן, ותוסיף גם את הלוגו");
-        m3.attachments.add(new YugiChat.Attachment("logo.png", "image/png", new byte[0], thumb(a)));
-        YugiChat.Msg m4 = new YugiChat.Msg("assistant", "הוספתי את הלוגו ואת שני הסעיפים. הקובץ שמור ב-Drive.");
-        YugiChat.setMessagesForTest(Arrays.asList(m1, m2, m3, m4));
+        layout(pc, w, h);
+        checkInside("unified chrome", pcChrome.visibleRects(), w, h, problems);
+        checkNoOverlap("unified chrome", pcChrome.visibleRects(), "unified chrome", pcChrome.visibleRects(), problems);
+        if (pcChrome.primaryRect() == null || pcChrome.primaryRect().width() < dp(a, 48)) problems.add("Yugi orb missing or under 48dp");
+        save(pc, name + "-e0-menu-unified");
+        pcChrome.setCollapsed(true);
+        layout(pc, w, h);
+        idle();
+        layout(pc, w, h);
+        if (pcChrome.visibleRects().size() != 2) problems.add("collapsed chrome should be [more | Yugi], got " + pcChrome.visibleRects().size());
+        checkInside("collapsed chrome", pcChrome.visibleRects(), w, h, problems);
+        save(pc, name + "-e0b-menu-collapsed");
+        pcChrome.setCollapsed(false);
+        layout(pc, w, h);
+
+        // ---- chat: empty state first
+        YugiChat.setMessagesForTest(new ArrayList<>());
         YugiChat.clearPendingForTest();
         YugiChat chat = new YugiChat(a, new YugiChat.Host() {
             @Override public void captureScreen(YugiChat.BitmapCallback cb) { cb.onBitmap(null); }
             @Override public void pickFile() {}
             @Override public int reservedTop() { return pcChrome.getReservedTop(); }
             @Override public void onKeyboard(boolean shown) { pcChrome.setChromeVisible(!shown); }
+            @Override public Rect anchorRect() { return pcChrome.primaryRectInWindow(); }
+            @Override public boolean anchorRight() { return pcChrome.isDockedRight(); }
+            @Override public void onChatOpen(boolean open) { pcChrome.setChatOpen(open); }
         });
+        chatRef[0] = chat;
         chat.rerenderForTest();
-        chat.setChipsForTest(new org.json.JSONArray(SESSIONS_JSON)); // session chips under the header
-        chat.addPendingForTest("screenshot-1412.jpg", "image/jpeg", new byte[0], thumb(a));
-        chat.addPendingForTest("הצעת מחיר.pdf", "application/pdf", new byte[0], null);
         pc.addView(chat, match());
         chat.setOpen(true);
+        layout(pc, w, h);
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(70)); // mid-flight: growing out of the orb
+        save(pc, name + "-e1a-chat-opening");
         idle();
         layout(pc, w, h);
+        chat.settleForTest();
+        layout(pc, w, h);
+        if (!pcChrome.visibleRects().isEmpty()) problems.add("chrome still takes touches while the chat is open");
+        save(pc, name + "-e1-chat-empty");
+
+        // ---- chat: a real conversation (Markdown lists, bold, links, an APK card, code)
+        YugiChat.Msg m1 = new YugiChat.Msg("user", "תפתח לי את הקובץ של ההצעה ללקוח ותסכם מה חסר");
+        YugiChat.Msg m2 = new YugiChat.Msg("assistant", "פתחתי את ההצעה. **חסרים שני דברים:**\n\n"
+                + "1. לוח זמנים לתשלום\n2. פרטי איש קשר של הלקוח\n\n"
+                + "הקובץ המקורי כאן: https://drive.google.com/file/d/1aB2cD/view\nלהוסיף אותם עכשיו?");
+        YugiChat.Msg m3 = new YugiChat.Msg("user", "כן, ותוסיף גם את הלוגו");
+        m3.attachments.add(new YugiChat.Attachment("logo.png", "image/png", new byte[0], thumb(a)));
+        YugiChat.Msg m4 = new YugiChat.Msg("assistant", "סיימתי. מה עשיתי:\n"
+                + "- הוספתי את הלוגו בראש העמוד\n- עדכנתי את **לוח התשלומים** לשלושה תשלומים\n"
+                + "- שמרתי גרסה ב[תיקיית ההצעות](https://drive.google.com/drive/folders/xyz)\n\n"
+                + "גם האפליקציה המעודכנת מוכנה להתקנה: http://100.104.166.48:8822/YugiPC.apk");
+        YugiChat.Msg m5 = new YugiChat.Msg("user", "תודה! ואיך מפעילים מחדש את הגשר?");
+        YugiChat.Msg m6 = new YugiChat.Msg("assistant", "בטרמינל:\n```\nsystemctl --user restart yugi-chat-bridge\n```\nזה לוקח בערך שלוש שניות, ו*השיחה נשמרת*.");
+        YugiChat.setMessagesForTest(Arrays.asList(m1, m2, m3, m4, m5, m6));
+        chat.rerenderForTest();
+        chat.setChipsForTest(new org.json.JSONArray(SESSIONS_JSON)); // session chips at the top
+        idle();
+        layout(pc, w, h);
+        chat.settleForTest();
         layout(pc, w, h);
         checkChat("chat", chat, pcChrome, w, h, 0, problems);
         save(pc, name + "-e-chat");
 
+        chat.addPendingForTest("screenshot-1412.jpg", "image/jpeg", new byte[0], thumb(a));
+        chat.addPendingForTest("הצעת מחיר.pdf", "application/pdf", new byte[0], null);
+        layout(pc, w, h);
+        layout(pc, w, h);
+        checkChat("chat+attachments", chat, pcChrome, w, h, 0, problems);
+        save(pc, name + "-e2-chat-attachments");
+
         int ime = Math.round(h * (land ? 0.55f : 0.40f)); // a real keyboard's share of the screen
         chat.setInsets(ime, 0);
         layout(pc, w, h);
+        layout(pc, w, h);
         checkChat("chat+keyboard", chat, pcChrome, w, h, ime, problems);
         drawKeyboard(pc, w, h, ime, name + "-f-chat-keyboard");
-
-        // ---- sessions: list of the server's Yugi sessions, then one session's live chat (+ keyboard)
         chat.setInsets(0, 0);
+        YugiChat.clearPendingForTest();
+        chat.rerenderForTest();
+
+        // ---- chat: Yugi thinking (the answer has no words yet)
+        YugiChat.setMessagesForTest(Arrays.asList(m1, m2, m5, new YugiChat.Msg("assistant", "")));
+        chat.rerenderForTest();
+        idle();
+        layout(pc, w, h);
+        chat.settleForTest();
+        layout(pc, w, h);
+        save(pc, name + "-e3-chat-thinking");
+        YugiChat.setMessagesForTest(Arrays.asList(m1, m2, m3, m4, m5, m6));
+        chat.rerenderForTest();
+
+        // ---- sessions: list (Mail style), a row swiped open, the in-row question, a fixed session's actions
         YugiSessions.offline = true;
         chat.showSessions(true);
         YugiSessions ss = chat.sessionsForTest();
@@ -192,9 +260,37 @@ public class YugiUiScreenshotTest {
         ss.renderList(new org.json.JSONArray(SESSIONS_JSON));
         idle();
         layout(pc, w, h);
+        chat.settleForTest();
+        ss.setAlpha(1f);
         layout(pc, w, h);
         checkSessionsList(chat, ss, pcChrome, w, h, problems);
         save(pc, name + "-h1-sessions");
+
+        java.util.List<YugiSwipeRow> rows = ss.rowsForTest();
+        YugiSwipeRow adhoc = null, fixed = null;
+        for (YugiSwipeRow r : rows) {
+            if ("3811174".equals(r.getTag())) adhoc = r;
+            if ("1354".equals(r.getTag())) fixed = r;
+        }
+        if (adhoc == null || fixed == null) problems.add("sessions: rows missing " + rows.size());
+        else {
+            adhoc.setOpen(true, false);
+            layout(pc, w, h);
+            for (String p : ss.rowProblems()) problems.add("swipe: " + p);
+            save(pc, name + "-h1b-swipe-end-session");
+            adhoc.setOpen(false, false);
+            adhoc.showConfirm(new YugiSwipeRow.Action("סיים ומחק", YugiTheme.RED,
+                    "לסיים את \"טובה בשמחות\" ולמחוק אותו מהרשימה?", "סיים ומחק", () -> {}));
+            idle();
+            layout(pc, w, h);
+            save(pc, name + "-h1c-confirm-end");
+            adhoc.hideConfirm();
+            fixed.setOpen(true, false);
+            layout(pc, w, h);
+            for (String p : ss.rowProblems()) problems.add("swipe fixed: " + p);
+            save(pc, name + "-h1d-swipe-hide");
+            fixed.setOpen(false, false);
+        }
 
         org.json.JSONArray list = new org.json.JSONArray(SESSIONS_JSON);
         ss.openDetail(list.getJSONObject(0));
@@ -229,6 +325,15 @@ public class YugiUiScreenshotTest {
         save(pc, name + "-h4-session-readonly");
         chat.showSessions(false);
         ss.animate().cancel();
+
+        // ---- closing folds the card back into the orb, and the chrome comes back
+        chat.setOpen(false);
+        idle();
+        chat.settleForTest();
+        idle();
+        layout(pc, w, h);
+        if (pcChrome.visibleRects().isEmpty()) problems.add("chrome did not come back after the chat closed");
+        save(pc, name + "-e4-after-close");
 
         // ---- launch sequence: splash -> branded connecting (with and without last frame) -> error
         android.graphics.drawable.Drawable splash = a.getDrawable(R.drawable.yugipc_launch_bg);
@@ -287,6 +392,7 @@ public class YugiUiScreenshotTest {
             if (r.left < panel.left || r.right > panel.right) problems.add("sessions: card leaves the panel " + r.toShortString());
         }
         checkNoOverlap("sessions cards", cards, "sessions cards", cards, problems);
+        for (String p : ss.rowProblems()) problems.add("sessions: " + p);
         checkNoOverlap("sessions", List.of(card), "chrome", chrome.visibleRects(), problems);
     }
 
@@ -303,14 +409,14 @@ public class YugiUiScreenshotTest {
     }
 
     private static final String SESSIONS_JSON = "["
-            + "{\"id\":\"1348\",\"name\":\"Personal\",\"areaLabel\":\"אישי\",\"state\":\"working\",\"canSend\":true,\"updatedAt\":" + (System.currentTimeMillis() - 20000)
+            + "{\"id\":\"1348\",\"name\":\"Personal\",\"area\":\"personal\",\"canEnd\":false,\"areaLabel\":\"אישי\",\"state\":\"working\",\"canSend\":true,\"updatedAt\":" + (System.currentTimeMillis() - 20000)
             + ",\"lastMessage\":{\"role\":\"assistant\",\"text\":\"יצא סוכן לתקן. התפריט ייגרר גם כשהוא פתוח וגם כשהוא סגור, וייצמד לקצה המסך. אשלח קישור כשיהיה מוכן.\"},"
             + "\"agents\":[{\"id\":\"a1\",\"description\":\"מסך סשנים ב-YugiPC\"},{\"id\":\"a2\",\"description\":\"תפריט צף נגרר\"}]},"
-            + "{\"id\":\"1354\",\"name\":\"Mamila\",\"areaLabel\":\"ממילא\",\"state\":\"waiting\",\"canSend\":true,\"updatedAt\":" + (System.currentTimeMillis() - 3 * 3600000)
+            + "{\"id\":\"1354\",\"name\":\"Mamila\",\"area\":\"mamila\",\"canEnd\":false,\"areaLabel\":\"ממילא\",\"state\":\"waiting\",\"canSend\":true,\"updatedAt\":" + (System.currentTimeMillis() - 3 * 3600000)
             + ",\"lastMessage\":{\"role\":\"user\",\"text\":\"תכין סיכום של הפגישה עם הזוג מאשדוד\"},\"agents\":[]},"
-            + "{\"id\":\"1362\",\"name\":\"NextPress\",\"areaLabel\":\"נקסט פרס\",\"state\":\"needs\",\"canSend\":true,\"updatedAt\":" + (System.currentTimeMillis() - 600000)
+            + "{\"id\":\"1362\",\"name\":\"NextPress\",\"area\":\"nextpress\",\"canEnd\":false,\"areaLabel\":\"נקסט פרס\",\"state\":\"needs\",\"canSend\":true,\"updatedAt\":" + (System.currentTimeMillis() - 600000)
             + ",\"lastMessage\":{\"role\":\"assistant\",\"text\":\"לא צריך APK חדש, מספיק להיכנס לאפליקציה.\"},\"agents\":[]},"
-            + "{\"id\":\"3811174\",\"name\":\"טובה בשמחות\",\"areaLabel\":\"כללי\",\"state\":\"waiting\",\"canSend\":false,\"sendNote\":\"הסשן נפתח מאפליקציית Claude, אז אפשר רק לצפות בו מכאן\",\"updatedAt\":" + (System.currentTimeMillis() - 2 * 86400000L)
+            + "{\"id\":\"3811174\",\"name\":\"טובה בשמחות\",\"area\":\"workspace\",\"canEnd\":true,\"areaLabel\":\"כללי\",\"state\":\"waiting\",\"canSend\":false,\"sendNote\":\"הסשן נפתח מאפליקציית Claude, אז אפשר רק לצפות בו מכאן\",\"updatedAt\":" + (System.currentTimeMillis() - 2 * 86400000L)
             + ",\"lastMessage\":{\"role\":\"assistant\",\"text\":\"התצוגה מוכנה, ושונה בה רק מה שטובה ביקשה.\"},\"agents\":[]}"
             + "]";
 

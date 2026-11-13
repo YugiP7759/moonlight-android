@@ -41,6 +41,11 @@ import java.util.Locale;
  * once the finger passes the touch slop); on release they spring to the nearest side edge like the Yugi bubble,
  * and the spot (side + height fraction) is remembered and kept on screen after rotation / fold.
  * Everything else (pad, panels) stays below {@link #getReservedTop()} so nothing overlaps the default spot.
+ * <p>
+ * With a primary button (Yugi) the chrome is the app's one floating control: the Yugi orb sits at the bar's
+ * outer end (the docked side), after a hairline, and stays when the bar collapses (the collapsed bar is
+ * [more | Yugi], so the chat is always one tap away). While the chat is open the whole chrome folds away into
+ * the orb ({@link #setChatOpen}) and the chat card grows out of {@link #primaryRectInWindow()}.
  */
 public class YugiChrome extends FrameLayout {
     public static final long AUTO_HIDE_MS = 3000;
@@ -101,6 +106,11 @@ public class YugiChrome extends FrameLayout {
     private int reservedTop;
     private ReservedTopListener reservedTopListener;
     private final Runnable collapseRunnable = () -> setCollapsed(true);
+    // the primary (Yugi) orb, its hairline and the "more" button of the collapsed bar; null without a primary
+    private final Button primary;
+    private ImageButton primaryView, moreBtn;
+    private View divider;
+    private boolean wantVisible = true, chatOpen, interactive = true;
 
     // ---- drag state: gx/gy = the bar's top-left (the handle hangs off the docked side of the same box)
     private static final String PREFS = "yugi_chrome";
@@ -128,8 +138,11 @@ public class YugiChrome extends FrameLayout {
         return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
     }
 
-    public YugiChrome(Context ctx, List<Button> items) {
+    public YugiChrome(Context ctx, List<Button> items) { this(ctx, items, null); }
+
+    public YugiChrome(Context ctx, List<Button> items, Button primaryButton) {
         super(ctx);
+        primary = primaryButton;
         setClipChildren(false);
         // Fixed placement in every locale: toolbar top-right, stats top-left
         setLayoutDirection(LAYOUT_DIRECTION_LTR);
@@ -168,6 +181,26 @@ public class YugiChrome extends FrameLayout {
             buttons.add(b);
             b.owner = this;
         }
+        if (primary != null) {
+            primaryView = new ImageButton(ctx);
+            primaryView.setImageResource(primary.icon);
+            primaryView.setImageTintList(ColorStateList.valueOf(Color.WHITE));
+            primaryView.setScaleType(ImageView.ScaleType.CENTER);
+            GradientDrawable mask = new GradientDrawable();
+            mask.setShape(GradientDrawable.OVAL);
+            mask.setColor(Color.WHITE);
+            primaryView.setBackground(new RippleDrawable(ColorStateList.valueOf(0x40FFFFFF), YugiTheme.orb(), mask));
+            primaryView.setContentDescription(primary.label);
+            primaryView.setFocusable(false);
+            primaryView.setOnClickListener(x -> { primary.onClick.run(); if (!chatOpen) poke(); });
+            primary.view = primaryView;
+            divider = new View(ctx);
+            divider.setBackgroundColor(0x33FFFFFF);
+            moreBtn = YugiTheme.iconButton(ctx, com.limelight.R.drawable.yugi_ic_more, "כל הכפתורים");
+            moreBtn.setOnClickListener(x -> { setCollapsed(false); poke(); });
+            moreBtn.setVisibility(GONE);
+            orderBar();
+        }
         addView(bar, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         for (Button b : buttons) {
             b.dot = makeDot(ctx);
@@ -200,6 +233,42 @@ public class YugiChrome extends FrameLayout {
 
         handleDot = makeDot(ctx);
         addView(handleDot, new LayoutParams(dp(DOT), dp(DOT)));
+
+        // show / hide on a spring; a hidden chrome leaves the layout once faded
+        YugiSpring.of(this, androidx.dynamicanimation.animation.DynamicAnimation.ALPHA).addEndListener((a, canceled, v, vel) -> {
+            if (!canceled && !interactive) setVisibility(GONE);
+        });
+    }
+
+    /** Bar order: [more] buttons… | Yugi, mirrored when docked left, so the orb is always at the outer end. */
+    private void orderBar() {
+        if (primaryView == null) return;
+        List<View> seq = new ArrayList<>();
+        seq.add(moreBtn);
+        for (Button b : buttons) seq.add(b.view);
+        seq.add(divider);
+        seq.add(primaryView);
+        if (!dockRight) java.util.Collections.reverse(seq);
+        bar.removeAllViews();
+        for (View v : seq) {
+            LinearLayout.LayoutParams lp = v == divider
+                    ? new LinearLayout.LayoutParams(Math.max(1, dp(1)), dp(24))
+                    : new LinearLayout.LayoutParams(dp(48), dp(48));
+            lp.gravity = Gravity.CENTER_VERTICAL;
+            int m = v == divider ? dp(6) : dp(2);
+            lp.leftMargin = m;
+            lp.rightMargin = m;
+            bar.addView(v, lp);
+        }
+    }
+
+    private static void popIn(View v) {
+        v.setAlpha(0f);
+        v.setScaleX(0.6f);
+        v.setScaleY(0.6f);
+        YugiSpring.to(v, androidx.dynamicanimation.animation.DynamicAnimation.ALPHA, 1f);
+        YugiSpring.to(v, androidx.dynamicanimation.animation.DynamicAnimation.SCALE_X, 1f);
+        YugiSpring.to(v, androidx.dynamicanimation.animation.DynamicAnimation.SCALE_Y, 1f);
     }
 
     private static final int DOT = 8; // dp
@@ -246,13 +315,19 @@ public class YugiChrome extends FrameLayout {
             b.dot.setTranslationX(bar.getTranslationX() + b.view.getRight() - inset - b.dot.getWidth() / 2f);
             b.dot.setTranslationY(bar.getTranslationY() + b.view.getTop() + inset - b.dot.getHeight() / 2f);
         }
-        handleDot.setTranslationX(handle.getTranslationX() + handle.getWidth() - inset - handleDot.getWidth() / 2f);
-        handleDot.setTranslationY(handle.getTranslationY() + inset - handleDot.getHeight() / 2f);
+        View hv = primaryView != null ? moreBtn : handle;
+        float hx = primaryView != null ? bar.getTranslationX() + moreBtn.getLeft() : handle.getTranslationX();
+        float hy = primaryView != null ? bar.getTranslationY() + moreBtn.getTop() : handle.getTranslationY();
+        handleDot.setTranslationX(hx + hv.getWidth() - inset - handleDot.getWidth() / 2f);
+        handleDot.setTranslationY(hy + inset - handleDot.getHeight() / 2f);
     }
 
     /** Adds the chrome over an activity's content. */
-    public static YugiChrome attach(Activity a, List<Button> items) {
-        YugiChrome c = new YugiChrome(a, items);
+    public static YugiChrome attach(Activity a, List<Button> items) { return attach(a, items, null); }
+
+    /** Adds the chrome with a primary orb (Yugi) at the bar's outer end. */
+    public static YugiChrome attach(Activity a, List<Button> items, Button primary) {
+        YugiChrome c = new YugiChrome(a, items, primary);
         a.addContentView(c, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         c.poke();
         return c;
@@ -281,9 +356,19 @@ public class YugiChrome extends FrameLayout {
     }
 
     public void setCollapsed(boolean c) {
+        boolean was = collapsed;
         collapsed = c;
-        bar.setVisibility(c ? GONE : VISIBLE);
-        handle.setVisibility(c ? VISIBLE : GONE);
+        if (primaryView != null) {
+            // one bar: collapsed it keeps only [more | Yugi]
+            for (Button b : buttons) b.view.setVisibility(c ? GONE : VISIBLE);
+            divider.setVisibility(c ? GONE : VISIBLE);
+            moreBtn.setVisibility(c ? VISIBLE : GONE);
+            if (was && !c) for (Button b : buttons) popIn(b.view);
+            if (!was && c) popIn(moreBtn);
+        } else {
+            bar.setVisibility(c ? GONE : VISIBLE);
+            handle.setVisibility(c ? VISIBLE : GONE);
+        }
         updateDots();
         if (placed && !dragging) {
             // a tap during a snap: finish at the resting spot so the opened bar is fully on screen
@@ -298,8 +383,74 @@ public class YugiChrome extends FrameLayout {
 
     /** Hides the whole chrome (e.g. while editing the pad). */
     public void setChromeVisible(boolean visible) {
-        setVisibility(visible ? VISIBLE : GONE);
-        if (visible) poke();
+        wantVisible = visible;
+        applyShown();
+        if (visible && !chatOpen) poke();
+    }
+
+    /**
+     * The chat opened from the Yugi orb: the chrome folds into the orb (fades and shrinks toward it on a
+     * spring) and comes back the same way when the chat closes.
+     */
+    public void setChatOpen(boolean open) {
+        if (chatOpen == open) return;
+        chatOpen = open;
+        applyShown();
+        if (!open && wantVisible) poke();
+    }
+
+    public boolean isChatOpen() { return chatOpen; }
+
+    private void applyShown() {
+        boolean show = wantVisible && !chatOpen;
+        interactive = show;
+        if (primaryView != null && primaryView.getWidth() > 0) {
+            // shrink toward the orb
+            bar.setPivotX(primaryView.getLeft() + primaryView.getWidth() / 2f);
+            bar.setPivotY(primaryView.getTop() + primaryView.getHeight() / 2f);
+        }
+        if (show) {
+            if (getVisibility() != VISIBLE) {
+                setAlpha(0f);
+                setVisibility(VISIBLE);
+            }
+            YugiSpring.to(this, androidx.dynamicanimation.animation.DynamicAnimation.ALPHA, 1f);
+            YugiSpring.to(bar, androidx.dynamicanimation.animation.DynamicAnimation.SCALE_X, 1f);
+            YugiSpring.to(bar, androidx.dynamicanimation.animation.DynamicAnimation.SCALE_Y, 1f);
+        } else if (getVisibility() == VISIBLE) {
+            if (getAlpha() <= 0f || getWidth() == 0) { setAlpha(0f); setVisibility(GONE); return; }
+            YugiSpring.to(this, androidx.dynamicanimation.animation.DynamicAnimation.ALPHA, 0f);
+            if (chatOpen) {
+                YugiSpring.to(bar, androidx.dynamicanimation.animation.DynamicAnimation.SCALE_X, 0.6f);
+                YugiSpring.to(bar, androidx.dynamicanimation.animation.DynamicAnimation.SCALE_Y, 0.6f);
+            }
+        }
+    }
+
+    /** True while the chrome takes touches (shown, not folded into the chat). */
+    public boolean isInteractive() { return interactive && getVisibility() == VISIBLE; }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        if (!interactive) return false; // fading out: touches go through to the stream
+        return super.dispatchTouchEvent(ev);
+    }
+
+    /** The Yugi orb in window coordinates (where the chat grows from), or null without a primary. */
+    public Rect primaryRectInWindow() {
+        if (primaryView == null || primaryView.getWidth() == 0) return null;
+        int[] loc = new int[2];
+        getLocationInWindow(loc);
+        int x = loc[0] + Math.round(bar.getTranslationX()) + primaryView.getLeft();
+        int y = loc[1] + Math.round(bar.getTranslationY()) + primaryView.getTop();
+        return new Rect(x, y, x + primaryView.getWidth(), y + primaryView.getHeight());
+    }
+
+    /** The orb in this view's coordinates (checks). */
+    public Rect primaryRect() {
+        if (primaryView == null) return null;
+        int x = Math.round(bar.getX()) + primaryView.getLeft(), y = Math.round(bar.getY()) + primaryView.getTop();
+        return new Rect(x, y, x + primaryView.getWidth(), y + primaryView.getHeight());
     }
 
     public void setHudVisible(boolean on) {
@@ -376,6 +527,9 @@ public class YugiChrome extends FrameLayout {
     private float restX(boolean right) { return right ? maxGx() : minGx(); }
     private float yFromFraction(float f) { return minGy() + clamp(f, 0f, 1f) * (maxGy() - minGy()); }
 
+    /** What the finger moves: the bar (always, with a primary) or the separate handle while collapsed. */
+    private boolean handleMode() { return collapsed && primaryView == null; }
+
     /** The handle hangs off the docked side of the bar's box, vertically centred on it. */
     private float handleOffsetX() { return dockRight ? bar.getWidth() - handle.getWidth() : 0; }
 
@@ -389,8 +543,8 @@ public class YugiChrome extends FrameLayout {
 
     /** True when (x, y) is on the visible part (bar or handle), in chrome coordinates. */
     private boolean hitsGroup(float x, float y) {
-        View v = collapsed ? handle : bar;
-        if (v.getVisibility() != VISIBLE || getVisibility() != VISIBLE) return false;
+        View v = handleMode() ? handle : bar;
+        if (v.getVisibility() != VISIBLE || getVisibility() != VISIBLE || !interactive) return false;
         return x >= v.getX() && x < v.getX() + v.getWidth() && y >= v.getY() && y < v.getY() + v.getHeight();
     }
 
@@ -414,8 +568,8 @@ public class YugiChrome extends FrameLayout {
     }
 
     private void moveTo(MotionEvent ev) {
-        View v = collapsed ? handle : bar;
-        float off = collapsed ? handleOffsetX() : 0;
+        View v = handleMode() ? handle : bar;
+        float off = handleMode() ? handleOffsetX() : 0;
         gx = clamp(startGx + ev.getX() - downX, -off, Math.max(-off, getWidth() - v.getWidth() - off));
         gy = clamp(startGy + ev.getY() - downY, 0, Math.max(0, getHeight() - bar.getHeight()));
         applyPosition();
@@ -429,12 +583,13 @@ public class YugiChrome extends FrameLayout {
             vy = velocity.getYVelocity();
         }
         // Project where the throw would coast to, then pick the nearest side edge (like iOS PiP)
-        View v = collapsed ? handle : bar;
+        View v = handleMode() ? handle : bar;
         boolean right = snapRight(v.getX() + v.getWidth() / 2f + project(vx), getWidth());
         if (right != dockRight) {
             float hx = handle.getX();
             dockRight = right;
-            if (collapsed) gx = hx - handleOffsetX(); // the handle stays exactly under the finger
+            if (handleMode()) gx = hx - handleOffsetX(); // the handle stays exactly under the finger
+            orderBar(); // the orb moves to the new outer end
             applyPosition();
             requestLayout(); // the stats pill moves to the other side
         }
@@ -531,11 +686,12 @@ public class YugiChrome extends FrameLayout {
     /** Bounding boxes of everything the chrome shows (for overlap checks). */
     public List<Rect> visibleRects() {
         List<Rect> out = new ArrayList<>();
-        if (getVisibility() != VISIBLE) return out;
+        if (getVisibility() != VISIBLE || !interactive) return out;
         if (bar.getVisibility() == VISIBLE) {
             int bx = Math.round(bar.getX()), by = Math.round(bar.getY());
-            for (Button b : buttons) {
-                View v = b.view;
+            for (int i = 0; i < bar.getChildCount(); i++) {
+                View v = bar.getChildAt(i);
+                if (v.getVisibility() != VISIBLE || v == divider) continue;
                 out.add(new Rect(bx + v.getLeft(), by + v.getTop(), bx + v.getRight(), by + v.getBottom()));
             }
         }

@@ -42,6 +42,9 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import androidx.dynamicanimation.animation.SpringAnimation;
+import androidx.dynamicanimation.animation.SpringForce;
+
 import com.limelight.BuildConfig;
 import com.limelight.LimeLog;
 import com.limelight.R;
@@ -90,6 +93,12 @@ public class YugiChat extends FrameLayout {
         int reservedTop();
         /** The keyboard opened or closed while the panel is open (hide the toolbar to make room). */
         default void onKeyboard(boolean shown) {}
+        /** The Yugi orb the card grows out of, in window coordinates (null: grow from the card's top corner). */
+        default Rect anchorRect() { return null; }
+        /** Whether the card sits on the right (the side the floating chrome is docked on). */
+        default boolean anchorRight() { return true; }
+        /** The chat opened or closed (the chrome folds into the orb while it is open). */
+        default void onChatOpen(boolean open) {}
     }
 
     public interface BitmapCallback { void onBitmap(Bitmap b); }
@@ -147,11 +156,13 @@ public class YugiChat extends FrameLayout {
     private final ScrollView scroll;
     private final EditText input;
     private final ImageButton micSend;
-    private final ImageButton stopBtn;
     private final TextView subtitle;
+    private final YugiAvatar avatar;
     private final LinearLayout attachRow;
     private final HorizontalScrollView attachScroll;
     private final LinearLayout inputBox;
+    private final LinearLayout composer;
+    private final View hair;
     /** The server's Yugi sessions, shown in place of this conversation (same card). */
     private final YugiSessions sessions;
     private boolean sessionsWanted;
@@ -172,8 +183,8 @@ public class YugiChat extends FrameLayout {
     private int navInset;
     private int kbInset;             // our own keyboard (animated with its spring)
     private YugiFieldKeyboard fieldKb;
-    private TextView liveBubble;
-    private YugiChatBubble fab;
+    private YugiMessages.Row liveRow;
+    private String lastRole;         // role of the last message in the list (spacing between speakers)
     private TextToSpeech tts;
     private boolean ttsReady;
     private boolean speakNext;
@@ -182,6 +193,11 @@ public class YugiChat extends FrameLayout {
     private File recordFile;
     private boolean micWasOn;
     private boolean sendMode;
+    private boolean recording;
+    private final SpringAnimation cardSX, cardSY;
+    private float closedScaleX = 0.2f, closedScaleY = 0.1f;
+
+    private static final String READY = "מחובר למחשב שלך";
 
     private int dp(float v) { return YugiTheme.dp(getContext(), v); }
 
@@ -192,42 +208,43 @@ public class YugiChat extends FrameLayout {
         setFocusable(false);
         setVisibility(GONE);
         YugiTheme.keepOnTop(this);
-        setLayoutDirection(LAYOUT_DIRECTION_LTR); // card on the right in every locale; its content is RTL
+        setLayoutDirection(LAYOUT_DIRECTION_LTR); // the card's side is chosen explicitly; its content is RTL
 
         card = new ChatCard(ctx);
         card.setLayoutDirection(LAYOUT_DIRECTION_RTL);
-        card.setBackground(YugiTheme.roundedStroke(ctx, YugiTheme.GLASS_STRONG, YugiTheme.RADIUS_L, YugiTheme.STROKE));
-        card.setElevation(dp(12));
+        card.setBackground(YugiTheme.roundedStroke(ctx, YugiTheme.GLASS_STRONG, 28, YugiTheme.STROKE));
+        card.setElevation(dp(16));
+        card.setClipToOutline(true); // the card grows out of the Yugi orb as one rounded shape
         card.setClickable(true); // touches on the card never reach the stream
-        card.setPadding(dp(8), dp(8), dp(8), dp(8));
+        card.setPadding(dp(10), dp(8), dp(10), dp(10));
         addView(card);
+        // Expanding from the orb: a little softer than the UI springs, with a hint of overshoot
+        cardSX = new SpringAnimation(card, androidx.dynamicanimation.animation.DynamicAnimation.SCALE_X);
+        cardSX.setSpring(new SpringForce(1f).setStiffness(420f).setDampingRatio(0.82f));
+        cardSY = new SpringAnimation(card, androidx.dynamicanimation.animation.DynamicAnimation.SCALE_Y);
+        cardSY.setSpring(new SpringForce(1f).setStiffness(420f).setDampingRatio(0.82f));
 
-        // ---- header ----
+        // ---- header: avatar with live badge, name + status line, actions ----
         LinearLayout head = new LinearLayout(ctx);
         head.setOrientation(LinearLayout.HORIZONTAL);
         head.setGravity(Gravity.CENTER_VERTICAL);
-        head.setPadding(dp(4), 0, 0, 0);
-        ImageView avatar = new ImageView(ctx);
-        avatar.setImageResource(R.drawable.yugi_ic_yugi);
-        avatar.setImageTintList(android.content.res.ColorStateList.valueOf(YugiTheme.ACCENT));
-        avatar.setScaleType(ImageView.ScaleType.CENTER);
-        GradientDrawable av = new GradientDrawable();
-        av.setShape(GradientDrawable.OVAL);
-        av.setColor(YugiTheme.SURFACE);
-        avatar.setBackground(av);
-        head.addView(avatar, new LinearLayout.LayoutParams(dp(36), dp(36)));
+        head.setPaddingRelative(dp(6), 0, 0, 0);
+        avatar = new YugiAvatar(ctx).set(YugiAvatar.YUGI, "יוגי");
+        avatar.setRingColor(0xFF10141B);
+        head.addView(avatar, new LinearLayout.LayoutParams(dp(40), dp(40)));
         LinearLayout titles = new LinearLayout(ctx);
         titles.setOrientation(LinearLayout.VERTICAL);
-        titles.setPadding(dp(10), 0, dp(10), 0);
-        titles.addView(YugiTheme.text(ctx, "יוגי", 16, 600, YugiTheme.TEXT));
-        subtitle = YugiTheme.text(ctx, "העוזר שלך במחשב", 12, 400, YugiTheme.TEXT_DIM);
-        subtitle.setPadding(0, dp(2), 0, 0);
-        titles.addView(subtitle);
+        titles.setPaddingRelative(dp(12), 0, dp(8), 0);
+        TextView title = YugiTheme.text(ctx, "יוגי", 17, 700, YugiTheme.TEXT);
+        title.setTextAlignment(TEXT_ALIGNMENT_VIEW_START);
+        titles.addView(title, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        subtitle = YugiTheme.text(ctx, READY, 13, 400, YugiTheme.TEXT_DIM);
+        subtitle.setPadding(0, dp(3), 0, 0);
+        subtitle.setMaxLines(1);
+        subtitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        subtitle.setTextAlignment(TEXT_ALIGNMENT_VIEW_START);
+        titles.addView(subtitle, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         head.addView(titles, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        stopBtn = YugiTheme.iconButton(ctx, R.drawable.yugi_ic_stop, "עצור");
-        stopBtn.setOnClickListener(v -> stop());
-        stopBtn.setVisibility(GONE);
-        head.addView(stopBtn, sq(48));
         ImageButton sessionsBtn = YugiTheme.iconButton(ctx, R.drawable.yugi_ic_sessions, "סשנים");
         sessionsBtn.setOnClickListener(v -> showSessions(true));
         head.addView(sessionsBtn, sq(48));
@@ -240,29 +257,42 @@ public class YugiChat extends FrameLayout {
         card.header = head;
         card.addView(head);
 
-        View hair = new View(ctx);
+        hair = new View(ctx);
         hair.setBackgroundColor(YugiTheme.STROKE);
-        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, dp(1)));
-        hlp.topMargin = dp(6);
+        hair.setAlpha(0f); // appears once the conversation scrolls under the header
         card.hair = hair;
         card.addView(hair);
 
-        // ---- messages ----
+        // ---- messages (they run under the floating composer) ----
         scroll = new ScrollView(ctx);
         scroll.setFillViewport(true);
         scroll.setVerticalScrollBarEnabled(false);
+        scroll.setClipToPadding(false);
+        scroll.setOverScrollMode(OVER_SCROLL_NEVER);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            scroll.setOnScrollChangeListener((v, x, y, ox, oy) ->
-                    stickToBottom = y >= ((ScrollView) v).getChildAt(0).getHeight() - v.getHeight() - dp(24));
+            scroll.setOnScrollChangeListener((v, x, y, ox, oy) -> {
+                ScrollView sv = (ScrollView) v;
+                int max = sv.getChildAt(0).getHeight() + sv.getPaddingTop() + sv.getPaddingBottom() - sv.getHeight();
+                stickToBottom = y >= max - dp(24);
+                hair.setAlpha(Math.min(1f, y / (float) dp(16)));
+            });
         }
         list = new LinearLayout(ctx);
         list.setOrientation(LinearLayout.VERTICAL);
-        list.setPadding(dp(4), dp(8), dp(4), dp(8));
+        list.setPadding(dp(6), dp(4), dp(6), dp(8));
         scroll.addView(list);
         card.scroll = scroll;
         card.addView(scroll);
 
-        // ---- attachment preview ----
+        // soft fade where the conversation slides under the composer
+        View fade = new View(ctx);
+        fade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0x000B0E14, 0xF20B0E14}));
+        card.fade = fade;
+        card.addView(fade);
+
+        // ---- composer: attachment preview + a floating rounded input bar ----
+        composer = new LinearLayout(ctx);
+        composer.setOrientation(LinearLayout.VERTICAL);
         attachRow = new LinearLayout(ctx);
         attachRow.setOrientation(LinearLayout.HORIZONTAL);
         attachRow.setPadding(dp(4), 0, dp(4), dp(6));
@@ -270,20 +300,21 @@ public class YugiChat extends FrameLayout {
         attachScroll.setHorizontalScrollBarEnabled(false);
         attachScroll.addView(attachRow);
         attachScroll.setVisibility(GONE);
-        card.attach = attachScroll;
-        card.addView(attachScroll);
+        composer.addView(attachScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        // ---- input ----
         inputBox = new LinearLayout(ctx);
         inputBox.setOrientation(LinearLayout.HORIZONTAL);
-        inputBox.setGravity(Gravity.CENTER_VERTICAL);
-        inputBox.setBackground(YugiTheme.roundedStroke(ctx, YugiTheme.SURFACE, 24, YugiTheme.STROKE));
+        inputBox.setGravity(Gravity.BOTTOM);
+        inputBox.setBackground(YugiTheme.roundedStroke(ctx, 0xFF1A202B, 28, 0x24FFFFFF));
+        inputBox.setElevation(dp(6));
         inputBox.setMinimumHeight(dp(56));
         inputBox.setPadding(dp(4), dp(4), dp(4), dp(4));
         ImageButton attach = YugiTheme.iconButton(ctx, R.drawable.yugi_ic_attach, "צרף קובץ");
+        attach.setImageTintList(android.content.res.ColorStateList.valueOf(YugiTheme.TEXT_DIM));
         attach.setOnClickListener(v -> { reopenOnAttach = true; host.pickFile(); });
         inputBox.addView(attach, sq(48));
         ImageButton shot = YugiTheme.iconButton(ctx, R.drawable.yugi_ic_screenshot, "צלם מסך");
+        shot.setImageTintList(android.content.res.ColorStateList.valueOf(YugiTheme.TEXT_DIM));
         shot.setOnClickListener(v -> takeScreenshot());
         inputBox.addView(shot, sq(48));
         input = new EditText(ctx);
@@ -291,13 +322,16 @@ public class YugiChat extends FrameLayout {
         input.setHintTextColor(YugiTheme.TEXT_FAINT);
         input.setTextColor(YugiTheme.TEXT);
         input.setTypeface(YugiTheme.font(ctx, 400));
-        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16.5f);
         input.setBackground(null);
-        input.setPadding(dp(8), dp(10), dp(8), dp(10));
+        input.setMinHeight(dp(48));
+        input.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        input.setPadding(dp(8), dp(11), dp(8), dp(11));
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-        input.setMaxLines(5);
+        input.setMaxLines(6);
         input.setImeOptions(EditorInfo.IME_ACTION_SEND | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
         input.setTextDirection(TEXT_DIRECTION_FIRST_STRONG);
+        input.setTextAlignment(TEXT_ALIGNMENT_VIEW_START);
         input.setShowSoftInputOnFocus(false); // the YugiPC keyboard types here, never the phone's
         input.setOnEditorActionListener((v, id, ev) -> {
             if (id == EditorInfo.IME_ACTION_SEND || (ev != null && ev.getKeyCode() == KeyEvent.KEYCODE_ENTER
@@ -313,13 +347,18 @@ public class YugiChat extends FrameLayout {
             @Override public void afterTextChanged(Editable s) { updateSendButton(); }
         });
         inputBox.addView(input, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        micSend = YugiTheme.iconButton(ctx, R.drawable.yugi_ic_mic, "הקלטה");
-        micSend.setOnClickListener(v -> { if (sendMode) sendTyped(); else onMic(); });
+        micSend = new ImageButton(ctx);
+        micSend.setScaleType(ImageView.ScaleType.CENTER);
+        micSend.setFocusable(false);
+        micSend.setOnClickListener(v -> {
+            if (busy && !recording) stop();
+            else if (sendMode) sendTyped();
+            else onMic();
+        });
         inputBox.addView(micSend, sq(48));
-        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        ilp.topMargin = dp(4);
-        card.input = inputBox;
-        card.addView(inputBox);
+        composer.addView(inputBox, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        card.input = composer;
+        card.addView(composer);
         updateSendButton();
 
         // ---- sessions panel (on top of everything in the card while shown) ----
@@ -327,6 +366,12 @@ public class YugiChat extends FrameLayout {
             @Override public void onBack() { showSessions(false); }
             @Override public void onClose() { setOpen(false); }
             @Override public void refreshList() { pollChips(); }
+            @Override public JSONObject appChat() { return appChatRow(); }
+            @Override public void newAppChat() { reset(); }
+            @Override public void onHiddenChanged() { renderChips(); }
+            @Override public void pickFile() { reopenOnAttach = true; YugiChat.this.host.pickFile(); }
+            @Override public void screenshot() { takeScreenshot(); }
+            @Override public View attachmentView(Attachment a) { return attachmentChip(a, true, compactAttachments); }
         });
         sessions.setVisibility(GONE);
         card.sessions = sessions;
@@ -358,6 +403,8 @@ public class YugiChat extends FrameLayout {
         card.chips = chipScroll;
         card.addView(chipScroll);
         card.swipe = this::swipeChip;
+        // the chip swipe stays off on the sessions list, where a row swipe opens its actions
+        card.swipeGate = () -> !sessionsWanted || sessions.isInDetail();
 
         // Keep the card above the keyboard and system bars
         setOnApplyWindowInsetsListener((v, insets) -> {
@@ -376,32 +423,35 @@ public class YugiChat extends FrameLayout {
     }
 
     /**
-     * Card layout with fixed priorities: the input row is always laid out first at the bottom, then the
-     * attachment preview above it, the header at the top, and the messages get whatever is left.
-     * With little room (keyboard open on the cover screen) the header is dropped.
+     * Card layout with fixed priorities: the composer floats at the bottom (the conversation scrolls under it),
+     * the chips and the header at the top, the messages get everything in between and behind the composer.
+     * With little room (keyboard open on the cover screen) the chips go first, then the header.
      */
     static final class ChatCard extends ViewGroup {
-        View header, hair, scroll, attach, input, sessions, chips;
+        View header, hair, scroll, fade, input, sessions, chips;
         interface Swipe { void onSwipe(int step); }
+        interface SwipeGate { boolean allowed(); }
         Swipe swipe;
+        SwipeGate swipeGate;
         boolean chipsWanted;
         private float downX, downY;
         private boolean swiping, swipeIgnored;
 
         private boolean sessionsShown() { return sessions != null && sessions.getVisibility() != GONE; }
-        private int chipsH() { return chips != null && chips.getVisibility() != GONE ? chips.getMeasuredHeight() + dp(6) : 0; }
+        private int chipsH() { return chips != null && chips.getVisibility() != GONE ? chips.getMeasuredHeight() + dp(8) : 0; }
         private View content() { return sessionsShown() ? sessions : scroll; }
 
         /** A horizontal swipe on the conversation switches to the next / previous session chip. */
         @Override
         public boolean onInterceptTouchEvent(android.view.MotionEvent e) {
             if (swipe == null || chips == null || !chipsWanted) return false;
+            if (swipeGate != null && !swipeGate.allowed()) return false;
             switch (e.getActionMasked()) {
                 case android.view.MotionEvent.ACTION_DOWN:
                     downX = e.getX();
                     downY = e.getY();
                     swiping = false;
-                    // not on the chips, the input row or the attachments
+                    // not on the chips, the composer or the attachments
                     swipeIgnored = (chips.getVisibility() != GONE && downY < chips.getBottom()) || downY > input.getTop() - dp(4);
                     return false;
                 case android.view.MotionEvent.ACTION_MOVE: {
@@ -455,28 +505,29 @@ public class YugiChat extends FrameLayout {
             int exactW = MeasureSpec.makeMeasureSpec(innerW, MeasureSpec.EXACTLY);
             // chips only with room to spare (they go first when the keyboard leaves little, before the header)
             int roomAfterInput = avail - dp(60 + 4);
-            boolean chipsOn = chips != null && chipsWanted && roomAfterInput >= dp(44 + 110);
+            boolean chipsOn = chips != null && chipsWanted && roomAfterInput >= dp(44 + 120);
             if (chips != null) chips.setVisibility(chipsOn ? VISIBLE : GONE);
             if (chipsOn) {
-                chips.measure(exactW, MeasureSpec.makeMeasureSpec(dp(38), MeasureSpec.EXACTLY));
+                chips.measure(exactW, MeasureSpec.makeMeasureSpec(dp(40), MeasureSpec.EXACTLY));
                 avail -= chipsH();
             }
             int atMost = MeasureSpec.makeMeasureSpec(Math.max(0, avail), MeasureSpec.AT_MOST);
             input.measure(exactW, atMost);
-            avail -= input.getMeasuredHeight() + dp(4);
-            if (attach.getVisibility() != GONE) {
-                attach.measure(exactW, MeasureSpec.makeMeasureSpec(Math.max(0, avail), MeasureSpec.AT_MOST));
-                avail -= attach.getMeasuredHeight();
-            }
-            boolean showHeader = avail >= dp(48 + 7 + 72); // keep at least a few lines of messages
+            int composerH = input.getMeasuredHeight();
+            int afterComposer = avail - composerH;
+            boolean showHeader = afterComposer >= dp(56 + 72); // keep at least a few lines of messages
             header.setVisibility(showHeader ? VISIBLE : GONE);
             hair.setVisibility(showHeader ? VISIBLE : GONE);
             if (showHeader) {
-                header.measure(exactW, MeasureSpec.makeMeasureSpec(dp(48), MeasureSpec.EXACTLY));
+                header.measure(exactW, MeasureSpec.makeMeasureSpec(dp(56), MeasureSpec.EXACTLY));
                 hair.measure(exactW, MeasureSpec.makeMeasureSpec(Math.max(1, dp(1)), MeasureSpec.EXACTLY));
-                avail -= header.getMeasuredHeight() + hair.getMeasuredHeight() + dp(6);
+                avail -= header.getMeasuredHeight() + hair.getMeasuredHeight();
             }
+            // the conversation runs to the card's bottom, its last message rests just above the composer
+            int padBottom = composerH + dp(14);
+            if (scroll.getPaddingBottom() != padBottom) scroll.setPadding(0, dp(6), 0, padBottom);
             scroll.measure(exactW, MeasureSpec.makeMeasureSpec(Math.max(0, avail), MeasureSpec.EXACTLY));
+            fade.measure(exactW, MeasureSpec.makeMeasureSpec(dp(28), MeasureSpec.EXACTLY));
             if (sessionsShown()) {
                 sessions.measure(exactW, MeasureSpec.makeMeasureSpec(Math.max(0, h - getPaddingTop() - getPaddingBottom() - chipsH()), MeasureSpec.EXACTLY));
             }
@@ -500,17 +551,15 @@ public class YugiChat extends FrameLayout {
             int contentTop = y;
             if (header.getVisibility() != GONE) {
                 header.layout(left, y, right, y + header.getMeasuredHeight());
-                y += header.getMeasuredHeight() + dp(6);
-                hair.layout(left, y, right, y + hair.getMeasuredHeight());
+                y += header.getMeasuredHeight();
+                hair.layout(left - getPaddingLeft(), y, right + getPaddingRight(), y + hair.getMeasuredHeight());
                 y += hair.getMeasuredHeight();
             }
             scroll.layout(left, y, right, y + scroll.getMeasuredHeight());
             int bottom = (b - t) - getPaddingBottom();
             input.layout(left, bottom - input.getMeasuredHeight(), right, bottom);
-            bottom -= input.getMeasuredHeight() + dp(4);
-            if (attach.getVisibility() != GONE) {
-                attach.layout(left, bottom - attach.getMeasuredHeight(), right, bottom);
-            }
+            int ft = bottom - input.getMeasuredHeight() - fade.getMeasuredHeight() + dp(10);
+            fade.layout(left, ft, right, ft + fade.getMeasuredHeight());
             if (sessionsShown()) {
                 sessions.layout(left, contentTop, right, contentTop + sessions.getMeasuredHeight());
             }
@@ -526,7 +575,6 @@ public class YugiChat extends FrameLayout {
         if (!isChatEnabled()) return null;
         YugiChat c = new YugiChat(a, host);
         a.addContentView(c, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        c.fab = YugiChatBubble.attach(a, c::toggle);
         c.attachKeyboard(a);
         current = c;
         c.renderPending();
@@ -608,28 +656,31 @@ public class YugiChat extends FrameLayout {
         card.layout(c.left, c.top, c.right, c.bottom);
         if (stickToBottom) {
             // Newest messages stay in view when the card shrinks (keyboard) or grows
-            scroll.scrollTo(0, Math.max(0, list.getMeasuredHeight() - scroll.getHeight()));
+            scroll.scrollTo(0, Math.max(0, list.getMeasuredHeight() + scroll.getPaddingTop() + scroll.getPaddingBottom() - scroll.getHeight()));
         }
     }
 
     private boolean stickToBottom = true;
 
-    /** Where the card goes: end side, below the toolbar, above the keyboard. */
+    /**
+     * Where the card goes: on the chrome's side, above the keyboard. With an orb to grow from, the chrome folds
+     * away while the chat is open, so the card takes the full height; otherwise it stays below the toolbar.
+     */
     Rect cardRect(int w, int h) {
         int m = dp(12);
-        // With the keyboard up the toolbar hides, so the card can use the whole height above it
-        int top = tight() ? m : Math.max(m, host != null ? host.reservedTop() : m);
+        boolean folds = host != null && host.anchorRect() != null;
+        int top = folds || tight() ? m : Math.max(m, host != null ? host.reservedTop() : m);
         int bottom = h - Math.max(m, Math.max(Math.max(imeInset, kbInset), navInset) + m);
-        int width = w >= dp(600) ? Math.min(dp(420), (int) (w * 0.46f)) : w - 2 * m;
-        boolean rtl = getLayoutDirection() == LAYOUT_DIRECTION_RTL;
-        int left = rtl ? m : w - m - width;
+        int width = w >= dp(600) ? Math.min(dp(460), (int) (w * 0.5f)) : w - 2 * m;
+        boolean right = host == null || host.anchorRight();
+        int left = right ? w - m - width : m;
         return new Rect(left, top, left + width, bottom);
     }
 
     /** Input field position (screen coordinates within this view), for checks. */
     public Rect inputRect() {
-        return new Rect(card.getLeft() + inputBox.getLeft(), card.getTop() + inputBox.getTop(),
-                card.getLeft() + inputBox.getRight(), card.getTop() + inputBox.getBottom());
+        int x = card.getLeft() + composer.getLeft() + inputBox.getLeft(), y = card.getTop() + composer.getTop() + inputBox.getTop();
+        return new Rect(x, y, x + inputBox.getWidth(), y + inputBox.getHeight());
     }
 
     public Rect cardRect() {
@@ -705,14 +756,26 @@ public class YugiChat extends FrameLayout {
         }
     }
 
+    /** The chips' sessions: the server's list without the ones Yagel hid (a hidden one comes back when it works). */
+    private JSONArray visibleSessions() {
+        return chipList == null ? new JSONArray() : YugiSessions.Hidden.filter(getContext(), chipList);
+    }
+
+    /** Whether the app chat ("יוגי") shows as a chip / row: hidden only while idle and not on screen. */
+    private boolean appChatVisible() {
+        return !YugiSessions.Hidden.isHidden(getContext(), YugiSessions.APP_CHAT_NAME) || busy || !sessionsWanted;
+    }
+
     /** Chip order: Yugi first, then the server's sessions. Null id = Yugi's own conversation. */
     private java.util.List<String> chipIds() {
         java.util.List<String> ids = new java.util.ArrayList<>();
-        ids.add(null);
-        if (chipList != null) for (int i = 0; i < chipList.length(); i++) {
-            JSONObject o = chipList.optJSONObject(i);
+        if (appChatVisible()) ids.add(null);
+        JSONArray l = visibleSessions();
+        for (int i = 0; i < l.length(); i++) {
+            JSONObject o = l.optJSONObject(i);
             if (o != null) ids.add(o.optString("id"));
         }
+        if (!ids.contains(activeChip())) ids.add(0, activeChip());
         return ids;
     }
 
@@ -722,8 +785,36 @@ public class YugiChat extends FrameLayout {
         return id == null ? !sessionsWanted : sessionsWanted && id.equals(sessions.currentId());
     }
 
+    /** The app chat as a sessions-list row (it isn't in /sessions: it runs inside the bridge). */
+    JSONObject appChatRow() {
+        JSONObject o = new JSONObject();
+        try {
+            o.put("id", YugiSessions.APP_CHAT_ID);
+            o.put("name", YugiSessions.APP_CHAT_NAME);
+            o.put("area", YugiAvatar.YUGI);
+            o.put("areaLabel", "הצ'אט באפליקציה");
+            o.put("state", busy ? "working" : "waiting");
+            o.put("canSend", true);
+            o.put("canEnd", false);
+            o.put("app", true);
+            synchronized (messages) {
+                for (int i = messages.size() - 1; i >= 0; i--) {
+                    Msg m = messages.get(i);
+                    if ("system".equals(m.role) || m.text.length() == 0) continue;
+                    o.put("lastMessage", new JSONObject().put("role", m.role).put("text", m.text.toString()));
+                    break;
+                }
+            }
+            o.put("updatedAt", lastActivity);
+        } catch (Exception ignored) {}
+        return o;
+    }
+
+    private static long lastActivity;
+
     private void renderChips() {
-        boolean has = chipList != null && chipList.length() > 0;
+        JSONArray l = visibleSessions();
+        boolean has = l.length() > 0;
         if (card.chipsWanted != has) {
             card.chipsWanted = has;
             if (has) {
@@ -734,32 +825,32 @@ public class YugiChat extends FrameLayout {
         }
         chipRow.removeAllViews();
         if (!has) return;
-        addChip(null, "יוגי", YugiTheme.ACCENT);
-        for (int i = 0; i < chipList.length(); i++) {
-            JSONObject o = chipList.optJSONObject(i);
+        if (appChatVisible()) addChip(null, YugiSessions.APP_CHAT_NAME, YugiAvatar.YUGI, busy ? "working" : "waiting");
+        for (int i = 0; i < l.length(); i++) {
+            JSONObject o = l.optJSONObject(i);
             if (o == null) continue;
-            addChip(o.optString("id"), o.optString("name"), YugiSessions.stateColor(o.optString("state", "waiting")));
+            addChip(o.optString("id"), o.optString("name"), o.optString("area"), o.optString("state", "waiting"));
         }
     }
 
-    private void addChip(String id, String name, int dotColor) {
+    /** A chip: mini avatar (with the live dot while it works) and the name; the current one is filled. */
+    private void addChip(String id, String name, String area, String state) {
         Context c = getContext();
         boolean on = chipActive(id);
         LinearLayout chip = new LinearLayout(c);
         chip.setOrientation(LinearLayout.HORIZONTAL);
         chip.setGravity(Gravity.CENTER_VERTICAL);
-        chip.setPadding(dp(12), 0, dp(14), 0);
-        chip.setBackground(on ? YugiTheme.rounded(c, YugiTheme.SURFACE_HI, 17)
-                : YugiTheme.roundedStroke(c, 0x00000000, 17, YugiTheme.STROKE));
-        View dot = new View(c);
-        GradientDrawable g = new GradientDrawable();
-        g.setShape(GradientDrawable.OVAL);
-        g.setColor(dotColor);
-        dot.setBackground(g);
-        chip.addView(dot, new LinearLayout.LayoutParams(dp(7), dp(7)));
-        TextView t = YugiTheme.text(c, name, 13, on ? 600 : 500, on ? YugiTheme.TEXT : YugiTheme.TEXT_DIM);
+        chip.setPaddingRelative(dp(5), 0, dp(14), 0);
+        chip.setBackground(on ? YugiTheme.roundedStroke(c, YugiTheme.SURFACE_HI, 20, 0x59FFFFFF)
+                : YugiTheme.rounded(c, 0x12FFFFFF, 20));
+        YugiAvatar av = new YugiAvatar(c).set(area, name);
+        av.setRingColor(on ? YugiTheme.SURFACE_HI : 0xFF161A22);
+        int sc = YugiSessions.stateColor(state);
+        av.setState("waiting".equals(state) ? 0 : sc, "working".equals(state));
+        chip.addView(av, new LinearLayout.LayoutParams(dp(30), dp(30)));
+        TextView t = YugiTheme.text(c, name, 14, on ? 600 : 500, on ? YugiTheme.TEXT : YugiTheme.TEXT_DIM);
         t.setMaxLines(1);
-        t.setPadding(dp(7), 0, 0, 0);
+        t.setPaddingRelative(dp(8), 0, 0, 0);
         t.setTextDirection(TEXT_DIRECTION_FIRST_STRONG);
         chip.addView(t);
         chip.setContentDescription(name);
@@ -769,8 +860,8 @@ public class YugiChat extends FrameLayout {
             int from = ids.indexOf(activeChip()), to = ids.indexOf(id);
             switchChip(id, to >= from ? 1 : -1);
         });
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(34));
-        lp.setMarginEnd(dp(6));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(40));
+        lp.setMarginEnd(dp(8));
         chipRow.addView(chip, lp);
         if (on) chipRow.post(() -> chipScroll.smoothScrollTo(
                 Math.max(0, chip.getLeft() - (chipScroll.getWidth() - chip.getWidth()) / 2), 0));
@@ -825,16 +916,16 @@ public class YugiChat extends FrameLayout {
     public void toggle() { setOpen(!open); }
 
     public void setOpen(boolean o) {
+        if (o == open && (o ? getVisibility() == VISIBLE : true)) return;
         open = o;
-        if (fab != null) fab.setShown(!o);
+        if (host != null) host.onChatOpen(o);
         if (o) {
-            if (getVisibility() != VISIBLE) {
-                setVisibility(VISIBLE);
-                card.setAlpha(0f);
-                card.setTranslationX(dp(24) * (getLayoutDirection() == LAYOUT_DIRECTION_RTL ? -1 : 1));
-            }
+            boolean appearing = getVisibility() != VISIBLE || card.getAlpha() < 0.05f;
+            setVisibility(VISIBLE);
+            aimAtOrb(appearing);
             YugiSpring.to(card, androidx.dynamicanimation.animation.DynamicAnimation.ALPHA, 1f);
-            YugiSpring.to(card, androidx.dynamicanimation.animation.DynamicAnimation.TRANSLATION_X, 0f);
+            cardSX.animateToFinalPosition(1f);
+            cardSY.animateToFinalPosition(1f);
             pollChips();
             if (!historyLoaded) loadHistory();
             if (sessionsWanted) sessions.setShown(true);
@@ -852,11 +943,67 @@ public class YugiChat extends FrameLayout {
             if (tts != null) tts.stop();
             removeCallbacks(chipPoll);
             pollGen++;
+            aimAtOrb(false);
+            // folds back into the orb: shrinks toward it while fading (alpha a little quicker than the scale)
             YugiSpring.to(card, androidx.dynamicanimation.animation.DynamicAnimation.ALPHA, 0f);
-            YugiSpring.to(card, androidx.dynamicanimation.animation.DynamicAnimation.TRANSLATION_X,
-                    dp(12) * (getLayoutDirection() == LAYOUT_DIRECTION_RTL ? -1 : 1));
+            cardSX.animateToFinalPosition(closedScaleX);
+            cardSY.animateToFinalPosition(closedScaleY);
         }
     }
+
+    /**
+     * Points the card's pivot at the Yugi orb (or its top outer corner without one), so the card grows out of
+     * the orb and folds back into it. {@code reset}: start from the orb's size, invisible.
+     */
+    private void aimAtOrb(boolean reset) {
+        View parent = (View) getParent();
+        int w = getWidth() > 0 ? getWidth() : parent != null ? parent.getWidth() : 0;
+        int h = getHeight() > 0 ? getHeight() : parent != null ? parent.getHeight() : 0;
+        if (w <= 0 || h <= 0) return;
+        Rect cr = cardRect(w, h);
+        if (cr.width() <= 0 || cr.height() <= 0) return;
+        Rect a = host != null ? host.anchorRect() : null;
+        float px, py;
+        if (a != null) {
+            int[] me = new int[2];
+            if (parent != null) parent.getLocationInWindow(me);
+            px = a.centerX() - me[0] - cr.left;
+            py = a.centerY() - me[1] - cr.top;
+            closedScaleX = Math.max(0.12f, a.width() / (float) cr.width());
+            closedScaleY = Math.max(0.06f, a.height() / (float) cr.height());
+        } else {
+            boolean right = host == null || host.anchorRight();
+            px = right ? cr.width() : 0;
+            py = 0;
+            closedScaleX = 0.85f;
+            closedScaleY = 0.85f;
+        }
+        card.setPivotX(Math.max(0, Math.min(cr.width(), px)));
+        card.setPivotY(Math.max(0, Math.min(cr.height(), py)));
+        if (reset) {
+            cardSX.cancel();
+            cardSY.cancel();
+            card.setAlpha(0f);
+            card.setScaleX(closedScaleX);
+            card.setScaleY(closedScaleY);
+        }
+    }
+
+    /** Ends the open / close springs at once (screenshots). */
+    void settleForTest() {
+        if (cardSX.isRunning()) cardSX.skipToEnd();
+        if (cardSY.isRunning()) cardSY.skipToEnd();
+        androidx.dynamicanimation.animation.SpringAnimation al = YugiSpring.of(card, androidx.dynamicanimation.animation.DynamicAnimation.ALPHA);
+        if (al.isRunning()) al.skipToEnd();
+        card.setScaleX(open ? 1f : closedScaleX);
+        card.setScaleY(open ? 1f : closedScaleY);
+        card.setAlpha(open ? 1f : 0f);
+        for (int i = 0; i < list.getChildCount(); i++) YugiMessages.settle(list.getChildAt(i));
+        sessions.settleForTest();
+    }
+
+    /** For checks / a frame mid-animation: the card's current scale. */
+    float cardScaleForTest() { return card.getScaleX(); }
 
     private void focusInput() {
         if (!open || sessionsWanted) return;
@@ -875,51 +1022,62 @@ public class YugiChat extends FrameLayout {
 
     private void renderAll() {
         list.removeAllViews();
-        liveBubble = null;
+        liveRow = null;
+        lastRole = null;
         synchronized (messages) {
-            if (messages.isEmpty()) {
-                TextView empty = YugiTheme.text(getContext(), "מה תרצה שאעשה?", 15, 400, YugiTheme.TEXT_DIM);
-                empty.setGravity(Gravity.CENTER);
-                empty.setPadding(0, dp(24), 0, dp(24));
-                list.addView(empty, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            }
-            for (Msg m : messages) addBubble(m);
+            if (messages.isEmpty()) list.addView(emptyState(), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            for (Msg m : messages) addRow(m, false);
         }
         refreshBusy();
         scrollToEnd();
     }
 
-    private TextView addBubble(Msg m) {
-        Context c = getContext();
-        LinearLayout wrap = new LinearLayout(c);
-        wrap.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams wlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        wlp.topMargin = dp(10);
+    private static final String[] SUGGESTIONS = {"מה יש לי היום?", "מה המצב בכל הסשנים?", "צלם את המסך ותסביר מה רואים"};
 
-        TextView t = YugiTheme.text(c, m.text.toString(), 15, 400, YugiTheme.TEXT);
-        t.setLineSpacing(dp(3), 1f);
-        t.setTextIsSelectable(true);
-        t.setTextDirection(TEXT_DIRECTION_FIRST_STRONG);
-        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        if ("user".equals(m.role)) {
-            wrap.setGravity(Gravity.START); // RTL: Yagel's messages on the right
-            t.setBackground(YugiTheme.rounded(c, YugiTheme.SURFACE_HI, YugiTheme.RADIUS_M));
-            t.setPadding(dp(14), dp(10), dp(14), dp(10));
-            t.setMaxWidth(dp(300));
-            for (Attachment a : m.attachments) wrap.addView(attachmentChip(a, false));
-            if (m.text.length() == 0) t.setVisibility(GONE);
-        } else if ("system".equals(m.role)) {
-            wrap.setGravity(Gravity.CENTER_HORIZONTAL);
-            t.setTextColor(YugiTheme.TEXT_FAINT);
-            t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        } else {
-            wrap.setGravity(Gravity.START);
-            t.setPadding(dp(4), dp(2), dp(4), dp(2));
-            tlp.width = ViewGroup.LayoutParams.MATCH_PARENT;
+    /** Before the first message: the orb, one line of welcome and a few one-tap starters. */
+    private View emptyState() {
+        Context c = getContext();
+        LinearLayout col = new LinearLayout(c);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setGravity(Gravity.CENTER_HORIZONTAL);
+        col.setTag("empty");
+        col.setPadding(dp(12), dp(36), dp(12), dp(16));
+        YugiAvatar orb = new YugiAvatar(c).set(YugiAvatar.YUGI, "יוגי");
+        col.addView(orb, new LinearLayout.LayoutParams(dp(64), dp(64)));
+        TextView t = YugiTheme.text(c, "במה אפשר לעזור?", 22, 700, YugiTheme.TEXT);
+        t.setGravity(Gravity.CENTER);
+        t.setPadding(0, dp(18), 0, 0);
+        col.addView(t);
+        TextView sub = YugiTheme.text(c, "אני מחובר למחשב שלך, לקבצים ולכל הסשנים", 15, 400, YugiTheme.TEXT_DIM);
+        sub.setGravity(Gravity.CENTER);
+        sub.setLineSpacing(0, 1.25f);
+        sub.setPadding(0, dp(8), 0, dp(22));
+        col.addView(sub);
+        for (String s : SUGGESTIONS) {
+            TextView p = YugiTheme.pill(c, s, 0x14FFFFFF, YugiTheme.TEXT);
+            p.setTypeface(YugiTheme.font(c, 500));
+            p.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
+            p.setOnClickListener(v -> { input.setText(s); input.setSelection(s.length()); focusInput(); });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.bottomMargin = dp(8);
+            col.addView(p, lp);
         }
-        wrap.addView(t, tlp);
-        list.addView(wrap, wlp);
-        return t;
+        return col;
+    }
+
+    /** Appends one message; {@code animate}: it springs in (new messages, never the loaded history). */
+    private YugiMessages.Row addRow(Msg m, boolean animate) {
+        View empty = list.findViewWithTag("empty");
+        if (empty != null) list.removeView(empty);
+        List<View> atts = new ArrayList<>();
+        if ("user".equals(m.role)) for (Attachment a : m.attachments) atts.add(attachmentChip(a, false));
+        YugiMessages.Row r = YugiMessages.build(getContext(), m.role, m.text.toString(), atts);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = YugiMessages.gapBefore(getContext(), lastRole, m.role);
+        lastRole = m.role;
+        list.addView(r.view, lp);
+        if (animate) YugiMessages.enter(r.view);
+        return r;
     }
 
     /**
@@ -943,7 +1101,7 @@ public class YugiChat extends FrameLayout {
             iv.setClipToOutline(true);
             iv.setBackground(YugiTheme.rounded(c, YugiTheme.SURFACE, YugiTheme.RADIUS_S - 1));
             frame.addView(iv, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            int w = compact ? 32 : removable ? 56 : 120, h = compact ? 32 : removable ? 56 : 72;
+            int w = compact ? 32 : removable ? 56 : 200, h = compact ? 32 : removable ? 56 : 132;
             content = frame;
             f.addView(frame, new LayoutParams(dp(w), dp(h)));
         } else {
@@ -1015,6 +1173,15 @@ public class YugiChat extends FrameLayout {
         for (Attachment a : pending) attachRow.addView(attachmentChip(a, true, compactAttachments));
         attachScroll.setVisibility(pending.isEmpty() ? GONE : VISIBLE);
         updateSendButton();
+        if (sessions != null) sessions.renderPending(); // a session's composer shows the same attachments
+    }
+
+    /** The shared attachments waiting to be sent (the chat or the open session sends them). */
+    static List<Attachment> pendingAttachments() { return pending; }
+
+    static void clearPending() {
+        pending.clear();
+        if (current != null) current.renderPending();
     }
 
     /** For checks: the remove button must not overlap the chip's content (icon, name or image). */
@@ -1048,7 +1215,8 @@ public class YugiChat extends FrameLayout {
 
     /** Messages fully visible in the list right now. */
     int visibleMessageCount() {
-        int top = scroll.getScrollY(), bottom = top + scroll.getHeight(), n = 0;
+        // above the floating composer (the list's bottom padding is the composer's room)
+        int top = scroll.getScrollY(), bottom = top + scroll.getHeight() - scroll.getPaddingBottom() + scroll.getPaddingTop(), n = 0;
         for (int i = 0; i < list.getChildCount(); i++) {
             View v = list.getChildAt(i);
             if (v.getHeight() > 0 && v.getTop() >= top && v.getBottom() <= bottom) n++;
@@ -1056,34 +1224,55 @@ public class YugiChat extends FrameLayout {
         return n;
     }
 
+    /** The round button at the composer's end: send (brand) with text, stop while Yugi answers, else the mic. */
     private void updateSendButton() {
+        if (recording) return;
         boolean canSend = input.getText().toString().trim().length() > 0 || !pending.isEmpty();
         sendMode = canSend;
-        micSend.setImageResource(canSend ? R.drawable.yugi_ic_send : R.drawable.yugi_ic_mic);
-        micSend.setContentDescription(canSend ? "שלח" : "הקלטה");
-        micSend.setRotation(canSend ? 180 : 0); // send arrow points left in RTL
-        if (canSend) {
-            GradientDrawable g = new GradientDrawable();
-            g.setShape(GradientDrawable.OVAL);
+        GradientDrawable g = new GradientDrawable();
+        g.setShape(GradientDrawable.OVAL);
+        GradientDrawable mask = new GradientDrawable();
+        mask.setShape(GradientDrawable.OVAL);
+        mask.setColor(Color.WHITE);
+        if (busy && !canSend) {
+            micSend.setImageResource(R.drawable.yugi_ic_stop);
+            micSend.setContentDescription("עצור");
+            micSend.setRotation(0);
             g.setColor(YugiTheme.TEXT);
-            micSend.setBackground(g);
             micSend.setImageTintList(android.content.res.ColorStateList.valueOf(0xFF0B0E14));
+        } else if (canSend) {
+            micSend.setImageResource(R.drawable.yugi_ic_send);
+            micSend.setContentDescription("שלח");
+            micSend.setRotation(180); // send arrow points left in RTL
+            g.setColor(YugiTheme.BRAND);
+            micSend.setImageTintList(android.content.res.ColorStateList.valueOf(Color.WHITE));
         } else {
-            YugiTheme.setActive(micSend, false);
+            micSend.setImageResource(R.drawable.yugi_ic_mic);
+            micSend.setContentDescription("הקלטה");
+            micSend.setRotation(0);
+            g.setColor(0x00000000);
+            micSend.setImageTintList(android.content.res.ColorStateList.valueOf(YugiTheme.TEXT_DIM));
         }
+        micSend.setBackground(new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(YugiTheme.RIPPLE), g, mask));
     }
 
     private void scrollToEnd() {
-        scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+        scroll.post(() -> scroll.smoothScrollTo(0, Math.max(0,
+                list.getHeight() + scroll.getPaddingTop() + scroll.getPaddingBottom() - scroll.getHeight())));
     }
 
+    /** Header status and the avatar's live badge follow the answer in progress. */
     private void refreshBusy() {
-        stopBtn.setVisibility(busy ? VISIBLE : GONE);
-        if (!busy) subtitle.setText("העוזר שלך במחשב");
+        avatar.setState(busy ? YugiTheme.GREEN : 0, busy);
+        if (!busy) setStatus("");
+        updateSendButton();
     }
 
     private void setStatus(String s) {
-        subtitle.setText(s == null || s.isEmpty() ? "העוזר שלך במחשב" : s);
+        boolean live = s != null && !s.isEmpty();
+        subtitle.setText(live ? s : READY);
+        subtitle.setTextColor(busy && live ? YugiTheme.GREEN : YugiTheme.TEXT_DIM);
     }
 
     // ---------------------------------------------------------------- attachments
@@ -1167,7 +1356,7 @@ public class YugiChat extends FrameLayout {
         historyLoaded = true;
     }
 
-    void rerenderForTest() { renderAll(); }
+    void rerenderForTest() { renderAll(); renderPending(); }
 
     // ---------------------------------------------------------------- network
 
@@ -1216,13 +1405,14 @@ public class YugiChat extends FrameLayout {
         renderPending();
         Msg answer = new Msg("assistant", "");
         synchronized (messages) {
-            if (messages.isEmpty()) list.removeAllViews();
+            if (messages.isEmpty()) { list.removeAllViews(); lastRole = null; }
             messages.add(user);
             messages.add(answer);
         }
-        addBubble(user);
-        liveBubble = addBubble(answer);
-        liveBubble.setText("…");
+        lastActivity = System.currentTimeMillis();
+        stickToBottom = true;
+        addRow(user, true);
+        liveRow = addRow(answer, true); // the thinking dots until the first words arrive
         refreshBusy();
         setStatus(user.attachments.isEmpty() ? "חושב…" : "מעלה קבצים…");
         scrollToEnd();
@@ -1284,7 +1474,7 @@ public class YugiChat extends FrameLayout {
                         if ("delta".equals(event)) {
                             String piece = d.optString("text");
                             synchronized (messages) { answer.text.append(piece); }
-                            ui.post(() -> { if (liveBubble != null) liveBubble.setText(answer.text); scrollToEnd(); });
+                            ui.post(() -> { if (liveRow != null) { liveRow.setText(answer.text.toString()); if (stickToBottom) scrollToEnd(); } });
                         } else if ("status".equals(event)) {
                             String tool = d.optString("tool", "");
                             ui.post(() -> setStatus(tool.isEmpty() ? "חושב…" : "עובד…"));
@@ -1319,8 +1509,9 @@ public class YugiChat extends FrameLayout {
                     else answer.text.append("\n(").append(err).append(")");
                 }
             }
-            if (liveBubble != null) liveBubble.setText(answer.text);
-            liveBubble = null;
+            if (liveRow != null) liveRow.setText(answer.text.toString());
+            liveRow = null;
+            lastActivity = System.currentTimeMillis();
             refreshBusy();
             scrollToEnd();
             if (err == null && speakNext) speak(answer.text.toString());
@@ -1377,6 +1568,7 @@ public class YugiChat extends FrameLayout {
     }
 
     private void setMicRecording(boolean rec) {
+        recording = rec;
         micSend.setImageResource(rec ? R.drawable.yugi_ic_stop : R.drawable.yugi_ic_mic);
         micSend.setRotation(0);
         GradientDrawable g = new GradientDrawable();

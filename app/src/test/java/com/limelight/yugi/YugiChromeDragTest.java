@@ -190,7 +190,8 @@ public class YugiChromeDragTest {
     public void overlaysStayAboveAnOpeningPlayer() {
         FrameLayout content = new FrameLayout(a);
         View stream = new View(a), keyboard = new View(a), player = new View(a);
-        YugiChatBubble bubble = new YugiChatBubble(a, () -> {});
+        View bubble = new View(a);
+        YugiTheme.keepOnTop(bubble);
         content.addView(stream);
         YugiChrome bar = new YugiChrome(a, Arrays.asList(
                 new YugiChrome.Button(R.drawable.yugi_ic_menu, "תפריט", () -> {})));
@@ -206,5 +207,77 @@ public class YugiChromeDragTest {
         assertEquals(bar, content.getChildAt(2));
         assertEquals(bubble, content.getChildAt(3));
         assertEquals(keyboard, content.getChildAt(4));
+    }
+
+    // ---------------------------------------------------------------- one floating control: menu + Yugi
+
+    private int yugiTaps;
+
+    private YugiChrome unified() {
+        root.removeAllViews();
+        YugiChrome c = new YugiChrome(a, Arrays.asList(
+                new YugiChrome.Button(R.drawable.yugi_ic_keyboard, "מקלדת", () -> clicks++),
+                new YugiChrome.Button(R.drawable.yugi_ic_menu, "תפריט", () -> {})),
+                new YugiChrome.Button(R.drawable.yugi_ic_yugi, "יוגי", () -> yugiTaps++));
+        c.setAutoHide(false);
+        root.addView(c, new FrameLayout.LayoutParams(-1, -1));
+        layout(w, h);
+        shadowOf(Looper.getMainLooper()).idle();
+        return c;
+    }
+
+    private void tap(Rect r) {
+        send(MotionEvent.ACTION_DOWN, r.centerX(), r.centerY());
+        t += 60;
+        send(MotionEvent.ACTION_UP, r.centerX(), r.centerY());
+        shadowOf(Looper.getMainLooper()).idle();
+    }
+
+    @Test
+    public void yugiOrbSitsAtTheOuterEndAndOneTapOpensTheChat() {
+        YugiChrome c = unified();
+        Rect orb = c.primaryRect();
+        Rect bar = c.barRect();
+        assertEquals("orb at the right (docked) end", bar.right - dp(4) - dp(2), orb.right, 2);
+        assertEquals(3, c.visibleRects().size()); // keyboard, menu, Yugi
+        tap(orb);
+        assertEquals(1, yugiTaps);
+        // collapsed: [more | Yugi], Yugi still one tap away
+        c.setCollapsed(true);
+        layout(w, h);
+        shadowOf(Looper.getMainLooper()).idle();
+        assertEquals(2, c.visibleRects().size());
+        Rect orb2 = c.primaryRect();
+        assertEquals(w - dp(12) - dp(4) - dp(2), orb2.right, 2);
+        tap(orb2);
+        assertEquals(2, yugiTaps);
+        assertTrue(c.isCollapsed());
+    }
+
+    @Test
+    public void draggedLeftTheOrbMovesToTheLeftEnd() {
+        YugiChrome c = unified();
+        Rect b = c.visibleRects().get(0);
+        drag(b.centerX(), b.centerY(), dp(150), h / 2f);
+        settle();
+        layout(w, h);
+        assertFalse(c.isDockedRight());
+        Rect orb = c.primaryRect();
+        assertEquals(c.barRect().left + dp(4) + dp(2), orb.left, 2);
+        assertEquals(0, yugiTaps);
+    }
+
+    @Test
+    public void openChatFoldsTheChromeAway() {
+        YugiChrome c = unified();
+        c.setChatOpen(true);
+        assertTrue("no targets while folding", c.visibleRects().isEmpty());
+        settle();
+        assertEquals(View.GONE, c.getVisibility());
+        c.setChatOpen(false);
+        settle();
+        assertEquals(View.VISIBLE, c.getVisibility());
+        assertEquals(1f, c.getAlpha(), 0.01f);
+        assertEquals(3, c.visibleRects().size());
     }
 }

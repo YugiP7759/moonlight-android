@@ -273,7 +273,10 @@ public class GamesActivity extends Activity {
 
     private void buildOverlay() {
         List<YugiChrome.Button> buttons = new ArrayList<>();
-        // יוגי: the draggable floating bubble (YugiChatBubble), not a toolbar button
+        // יוגי: the chrome's primary orb (one floating control); the chat grows out of it
+        YugiChrome.Button yugi = new YugiChrome.Button(R.drawable.yugi_ic_yugi, "יוגי", () -> {
+            if (chat != null) chat.toggle();
+        });
         padButton = new YugiChrome.Button(R.drawable.yugi_ic_gamepad, "הצג או הסתר שלט", this::togglePad);
         padButton.active = pad.isPadEnabled();
         buttons.add(padButton);
@@ -299,7 +302,7 @@ public class GamesActivity extends Activity {
             }
         });
 
-        chrome = new YugiChrome(this, buttons);
+        chrome = new YugiChrome(this, buttons, YugiChat.isChatEnabled() ? yugi : null);
         root.addView(chrome, match());
         chrome.setReservedTopListener(pad::setTopInset);
         chrome.setHudVisible(statsOn);
@@ -314,6 +317,9 @@ public class GamesActivity extends Activity {
             @Override public void pickFile() { pickingFile = true; YugiChat.openPicker(GamesActivity.this); }
             @Override public int reservedTop() { return chrome.getReservedTop(); }
             @Override public void onKeyboard(boolean shown) { chrome.setChromeVisible(!shown); }
+            @Override public android.graphics.Rect anchorRect() { return chrome.primaryRectInWindow(); }
+            @Override public boolean anchorRight() { return chrome.isDockedRight(); }
+            @Override public void onChatOpen(boolean open) { chrome.setChatOpen(open); }
         });
         // web page fields (Boosteroid login, search) type with the YugiPC keyboard, never the phone's
         YugiWebKeyboard.attach(this, web, YugiFieldKeyboard.forActivity(this, chat));

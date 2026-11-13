@@ -32,6 +32,17 @@ public final class YugiTheme {
     public static final int ACCENT = 0xFFC9D4FF;       // muted periwinkle, used sparingly
     public static final int DANGER = 0xFFE5484D;
     public static final int RIPPLE = 0x33FFFFFF;
+    // Brand (user bubbles, the Yugi orb, primary actions) and links on dark
+    public static final int BRAND = 0xFF4F63E8;
+    public static final int BRAND_HI = 0xFF6E83FF;
+    public static final int BRAND_DEEP = 0xFF3A47C4;
+    public static final int LINK = 0xFF9DADFF;
+    public static final int TEXT_ON_BRAND = 0xFFFFFFFF;
+    public static final int CARD = 0xFF141922;        // grouped rows, composer
+    public static final int GREEN = 0xFF30D158;       // iOS system colors (dark)
+    public static final int ORANGE = 0xFFFF9F0A;
+    public static final int RED = 0xFFFF453A;
+    public static final int GRAY = 0xFF636366;
 
     public static final int RADIUS_L = 20; // dp
     public static final int RADIUS_M = 14;
@@ -171,6 +182,36 @@ public final class YugiTheme {
         sb.setThumbOffset(dp(c, 12));
         sb.setPadding(dp(c, 14), 0, dp(c, 14), 0);
         sb.setSplitTrack(false);
+    }
+
+    /** Rounded rect with its own radius per corner (dp): top-left, top-right, bottom-right, bottom-left. */
+    public static GradientDrawable corners(Context c, int color, float tl, float tr, float br, float bl) {
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(color);
+        float a = dp(c, tl), b = dp(c, tr), d = dp(c, br), e = dp(c, bl);
+        g.setCornerRadii(new float[]{a, a, b, b, d, d, e, e});
+        return g;
+    }
+
+    /** The Yugi orb fill: a soft brand gradient circle. */
+    public static GradientDrawable orb() {
+        GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{BRAND_HI, BRAND_DEEP});
+        g.setShape(GradientDrawable.OVAL);
+        return g;
+    }
+
+    /** Pill button (48dp tall): filled or quiet. */
+    public static TextView pill(Context c, String label, int fill, int textColor) {
+        TextView t = text(c, label, 15, 600, textColor);
+        t.setGravity(android.view.Gravity.CENTER);
+        t.setMinHeight(dp(c, TOUCH));
+        t.setPadding(dp(c, 18), 0, dp(c, 18), 0);
+        GradientDrawable shape = rounded(c, fill, 24);
+        GradientDrawable mask = rounded(c, Color.WHITE, 24);
+        t.setBackground(new RippleDrawable(ColorStateList.valueOf(RIPPLE), shape, mask));
+        t.setClickable(true);
+        t.setFocusable(false);
+        return t;
     }
 
     public static TextView text(Context c, String s, float sp, int weight, int color) {

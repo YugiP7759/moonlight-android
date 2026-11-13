@@ -66,10 +66,79 @@ public class YugiSessions extends FrameLayout {
         void onClose();
         /** Fetch /sessions now; the chat's single poller hands the result back through {@link #onListResult}. */
         default void refreshList() {}
+        /** The app's own chat as a row (it isn't in /sessions), or null. */
+        default JSONObject appChat() { return null; }
+        /** Start a new conversation in the app's chat. */
+        default void newAppChat() {}
+        /** A session was hidden or came back (the chips follow). */
+        default void onHiddenChanged() {}
+        /** Open the file picker for an attachment (it lands in the shared pending list). */
+        default void pickFile() {}
+        /** Capture the desktop / game into the shared pending list. */
+        default void screenshot() {}
+        /** A view for a pending attachment (with its remove button). */
+        default View attachmentView(YugiChat.Attachment a) { return null; }
     }
 
-    static final int GREEN = 0xFF30D158;  // iOS system green (dark)
-    static final int ORANGE = 0xFFFF9F0A; // iOS system orange (dark)
+    static final int GREEN = YugiTheme.GREEN;
+    static final int ORANGE = YugiTheme.ORANGE;
+    static final String APP_CHAT_ID = "app";
+    static final String APP_CHAT_NAME = "יוגי";
+
+    /**
+     * Sessions Yagel hid from the list, by name (the area sessions get a new pid whenever their service restarts).
+     * A hidden session comes back on its own once it works again.
+     */
+    static final class Hidden {
+        private static final String PREFS = "yugi_sessions";
+        private Hidden() {}
+
+        static java.util.Set<String> all(Context c) {
+            return new java.util.HashSet<>(c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getStringSet("hidden", java.util.Collections.emptySet()));
+        }
+
+        static boolean isHidden(Context c, String name) { return all(c).contains(name); }
+
+        static void set(Context c, String name, boolean hidden) {
+            java.util.Set<String> h = all(c);
+            if (hidden ? h.add(name) : h.remove(name)) {
+                c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putStringSet("hidden", h).apply();
+            }
+        }
+
+        static void clear(Context c) {
+            c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove("hidden").apply();
+        }
+
+        /** The list without hidden sessions; a hidden one that works again is un-hidden for good. */
+        static JSONArray filter(Context c, JSONArray list) {
+            java.util.Set<String> h = all(c);
+            JSONArray out = new JSONArray();
+            for (int i = 0; i < list.length(); i++) {
+                JSONObject o = list.optJSONObject(i);
+                if (o == null) continue;
+                String name = o.optString("name");
+                if (h.contains(name)) {
+                    if (!"working".equals(o.optString("state"))) continue;
+                    set(c, name, false);
+                }
+                out.put(o);
+            }
+            return out;
+        }
+
+        /** How many of {@code list} are hidden right now. */
+        static int count(Context c, JSONArray list) {
+            java.util.Set<String> h = all(c);
+            int n = 0;
+            for (int i = 0; i < list.length(); i++) {
+                JSONObject o = list.optJSONObject(i);
+                if (o != null && h.contains(o.optString("name")) && !"working".equals(o.optString("state"))) n++;
+            }
+            return n;
+        }
+    }
     static final long LIST_POLL_MS = 3000;
 
     private static final OkHttpClient http = new OkHttpClient.Builder()
@@ -87,11 +156,14 @@ public class YugiSessions extends FrameLayout {
     private final FrameLayout listPage, detailPage;
     private final LinearLayout cards;
     private final TextView listStatus;
+    private final TextView hiddenFooter;
     private final LinearLayout msgList;
     private final ScrollView msgScroll;
     private final TextView detailTitle, detailSubtitle;
-    private final View detailDot;
+    private final YugiAvatar detailAvatar;
     private final LinearLayout inputBox;
+    private final LinearLayout attachRow;
+    private final android.widget.HorizontalScrollView attachScroll;
     private final EditText input;
     private final ImageButton send;
     private final TextView readOnlyNote;
@@ -105,7 +177,10 @@ public class YugiSessions extends FrameLayout {
     private int streamGen; // bumps on every (re)connect / leave; stale readers stop
     private volatile Call streamCall;
     private final Set<String> seenIds = new HashSet<>();
-    private final List<TextView> pendingBubbles = new ArrayList<>();
+    private final List<Pending> pendingBubbles = new ArrayList<>();
+    private String lastRole;
+    private final List<YugiSwipeRow> rows = new ArrayList<>();
+    private JSONArray lastList;
     private boolean stickToBottom = true;
 
     private int dp(float v) { return YugiTheme.dp(getContext(), v); }
@@ -117,21 +192,14 @@ public class YugiSessions extends FrameLayout {
         setClickable(true);
         setClipChildren(true);
 
-        // ---------------- list page
+        // ---------------- list page: a large title over one grouped list (Mail / Messages on iPad)
         listPage = new FrameLayout(ctx);
         LinearLayout lcol = column(ctx);
         LinearLayout lhead = header(ctx);
         ImageButton back = YugiTheme.iconButton(ctx, R.drawable.yugi_ic_back, "חזרה ליוגי");
         back.setOnClickListener(v -> host.onBack());
         lhead.addView(back, sq(48));
-        LinearLayout ltitles = new LinearLayout(ctx);
-        ltitles.setOrientation(LinearLayout.VERTICAL);
-        ltitles.setPadding(dp(4), 0, dp(8), 0);
-        ltitles.addView(YugiTheme.text(ctx, "סשנים", 20, 700, YugiTheme.TEXT));
-        listStatus = YugiTheme.text(ctx, "טוען…", 12, 400, YugiTheme.TEXT_DIM);
-        listStatus.setPadding(0, dp(2), 0, 0);
-        ltitles.addView(listStatus);
-        lhead.addView(ltitles, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        lhead.addView(new View(ctx), new LinearLayout.LayoutParams(0, 1, 1));
         ImageButton close = YugiTheme.iconButton(ctx, R.drawable.yugi_ic_close, "סגור");
         close.setOnClickListener(v -> host.onClose());
         lhead.addView(close, sq(48));
@@ -139,10 +207,38 @@ public class YugiSessions extends FrameLayout {
         ScrollView lscroll = new ScrollView(ctx);
         lscroll.setVerticalScrollBarEnabled(false);
         lscroll.setFillViewport(true);
+        lscroll.setOverScrollMode(OVER_SCROLL_NEVER);
+        LinearLayout lbody = column(ctx);
+        lbody.setPadding(dp(4), 0, dp(4), dp(16));
+        TextView big = YugiTheme.text(ctx, "סשנים", 30, 700, YugiTheme.TEXT);
+        big.setTextAlignment(TEXT_ALIGNMENT_VIEW_START);
+        big.setPaddingRelative(dp(6), dp(2), 0, 0);
+        lbody.addView(big, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        listStatus = YugiTheme.text(ctx, "טוען…", 14, 400, YugiTheme.TEXT_DIM);
+        listStatus.setTextAlignment(TEXT_ALIGNMENT_VIEW_START);
+        listStatus.setPaddingRelative(dp(6), dp(4), 0, dp(14));
+        lbody.addView(listStatus, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         cards = new LinearLayout(ctx);
         cards.setOrientation(LinearLayout.VERTICAL);
-        cards.setPadding(dp(2), dp(8), dp(2), dp(12));
-        lscroll.addView(cards);
+        cards.setBackground(YugiTheme.rounded(ctx, YugiTheme.CARD, 18));
+        cards.setClipToOutline(true);
+        lbody.addView(cards, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        hiddenFooter = YugiTheme.pill(ctx, "", 0x00000000, YugiTheme.LINK);
+        hiddenFooter.setVisibility(GONE);
+        hiddenFooter.setOnClickListener(v -> {
+            Hidden.clear(getContext());
+            host.onHiddenChanged();
+            if (lastList != null) renderList(lastList);
+        });
+        LinearLayout.LayoutParams flp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        flp.gravity = Gravity.CENTER_HORIZONTAL;
+        flp.topMargin = dp(10);
+        lbody.addView(hiddenFooter, flp);
+        TextView hint = YugiTheme.text(ctx, "החלקה שמאלה על שורה פותחת פעולות", 12.5f, 400, YugiTheme.TEXT_FAINT);
+        hint.setGravity(Gravity.CENTER);
+        hint.setPadding(0, dp(10), 0, 0);
+        lbody.addView(hint, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        lscroll.addView(lbody);
         lcol.addView(lscroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
         listPage.addView(lcol, match());
         addView(listPage, match());
@@ -158,7 +254,11 @@ public class YugiSessions extends FrameLayout {
         LinearLayout dtitles = new LinearLayout(ctx);
         dtitles.setOrientation(LinearLayout.VERTICAL);
         dtitles.setPadding(dp(4), 0, dp(8), 0);
-        detailTitle = YugiTheme.text(ctx, "", 17, 600, YugiTheme.TEXT);
+        detailAvatar = new YugiAvatar(ctx);
+        detailAvatar.setRingColor(0xFF10141B);
+        dhead.addView(detailAvatar, new LinearLayout.LayoutParams(dp(38), dp(38)));
+        dtitles.setPaddingRelative(dp(10), 0, dp(8), 0);
+        detailTitle = YugiTheme.text(ctx, "", 17, 700, YugiTheme.TEXT);
         detailTitle.setMaxLines(1);
         detailTitle.setEllipsize(TextUtils.TruncateAt.END);
         detailTitle.setTextAlignment(TEXT_ALIGNMENT_VIEW_START);
@@ -167,13 +267,10 @@ public class YugiSessions extends FrameLayout {
         subRow.setOrientation(LinearLayout.HORIZONTAL);
         subRow.setGravity(Gravity.CENTER_VERTICAL);
         subRow.setPadding(0, dp(3), 0, 0);
-        detailDot = dot(ctx, YugiTheme.TEXT_FAINT);
-        subRow.addView(detailDot, new LinearLayout.LayoutParams(dp(7), dp(7)));
-        detailSubtitle = YugiTheme.text(ctx, "", 12, 400, YugiTheme.TEXT_DIM);
+        detailSubtitle = YugiTheme.text(ctx, "", 13, 400, YugiTheme.TEXT_DIM);
         detailSubtitle.setMaxLines(1);
         detailSubtitle.setEllipsize(TextUtils.TruncateAt.END);
         detailSubtitle.setTextAlignment(TEXT_ALIGNMENT_VIEW_START);
-        detailSubtitle.setPaddingRelative(dp(6), 0, 0, 0);
         subRow.addView(detailSubtitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         dtitles.addView(subRow);
         dhead.addView(dtitles, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
@@ -212,20 +309,42 @@ public class YugiSessions extends FrameLayout {
         rlp.topMargin = dp(4);
         dcol.addView(readOnlyNote, rlp);
 
+        // attachments waiting for this session (shared with the chat: one picker, one screenshot)
+        attachRow = new LinearLayout(ctx);
+        attachRow.setOrientation(LinearLayout.HORIZONTAL);
+        attachRow.setPadding(dp(4), dp(4), dp(4), dp(4));
+        attachScroll = new android.widget.HorizontalScrollView(ctx);
+        attachScroll.setHorizontalScrollBarEnabled(false);
+        attachScroll.addView(attachRow);
+        attachScroll.setVisibility(GONE);
+        dcol.addView(attachScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
         inputBox = new LinearLayout(ctx);
         inputBox.setOrientation(LinearLayout.HORIZONTAL);
-        inputBox.setGravity(Gravity.CENTER_VERTICAL);
-        inputBox.setBackground(YugiTheme.roundedStroke(ctx, YugiTheme.SURFACE, 24, YugiTheme.STROKE));
+        inputBox.setGravity(Gravity.BOTTOM);
+        inputBox.setBackground(YugiTheme.roundedStroke(ctx, 0xFF1A202B, 28, 0x24FFFFFF));
+        inputBox.setElevation(dp(6));
         inputBox.setMinimumHeight(dp(56));
-        inputBox.setPadding(dp(12), dp(4), dp(4), dp(4));
+        inputBox.setPadding(dp(4), dp(4), dp(4), dp(4));
+        ImageButton attach = YugiTheme.iconButton(ctx, R.drawable.yugi_ic_attach, "צרף קובץ או תמונה");
+        attach.setImageTintList(android.content.res.ColorStateList.valueOf(YugiTheme.TEXT_DIM));
+        attach.setOnClickListener(v -> host.pickFile());
+        inputBox.addView(attach, sq(48));
+        ImageButton shot = YugiTheme.iconButton(ctx, R.drawable.yugi_ic_screenshot, "צלם את המסך");
+        shot.setImageTintList(android.content.res.ColorStateList.valueOf(YugiTheme.TEXT_DIM));
+        shot.setOnClickListener(v -> host.screenshot());
+        inputBox.addView(shot, sq(48));
         input = new EditText(ctx);
         input.setHint("הודעה לסשן");
         input.setHintTextColor(YugiTheme.TEXT_FAINT);
         input.setTextColor(YugiTheme.TEXT);
         input.setTypeface(YugiTheme.font(ctx, 400));
-        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16.5f);
         input.setBackground(null);
-        input.setPadding(dp(4), dp(10), dp(8), dp(10));
+        input.setMinHeight(dp(48));
+        input.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        input.setTextAlignment(TEXT_ALIGNMENT_VIEW_START);
+        input.setPadding(dp(8), dp(11), dp(8), dp(11));
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         input.setMaxLines(5);
         input.setImeOptions(EditorInfo.IME_ACTION_SEND | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
@@ -437,6 +556,7 @@ public class YugiSessions extends FrameLayout {
 
     private void renderEmpty(String msg) {
         cards.removeAllViews();
+        rows.clear();
         TextView t = YugiTheme.text(getContext(), msg, 15, 400, YugiTheme.TEXT_DIM);
         t.setGravity(Gravity.CENTER);
         t.setPadding(0, dp(32), 0, dp(32));
@@ -444,50 +564,104 @@ public class YugiSessions extends FrameLayout {
     }
 
     void renderList(JSONArray list) {
+        lastList = list;
         long now = System.currentTimeMillis();
         int working = 0;
+        // keep an open row / an open question across the 3 s refresh (don't yank it from under the finger)
+        for (YugiSwipeRow r : rows) if (r.isOpen() || r.isConfirming()) { refreshStatus(list); return; }
         cards.removeAllViews();
-        if (list.length() == 0) { renderEmpty("אין סשנים פעילים"); listStatus.setText("אין סשנים פעילים"); return; }
-        for (int i = 0; i < list.length(); i++) {
-            JSONObject s = list.optJSONObject(i);
-            if (s == null) continue;
-            if ("working".equals(s.optString("state"))) working++;
-            cards.addView(card(s, now));
+        rows.clear();
+        JSONArray shown = Hidden.filter(getContext(), list);
+        JSONObject app = host.appChat();
+        List<JSONObject> all = new ArrayList<>();
+        if (app != null && (!Hidden.isHidden(getContext(), APP_CHAT_NAME) || "working".equals(app.optString("state")))) {
+            if (Hidden.isHidden(getContext(), APP_CHAT_NAME)) Hidden.set(getContext(), APP_CHAT_NAME, false);
+            all.add(app);
         }
-        listStatus.setText(list.length() + " פעילים" + (working > 0 ? " · " + working + " עובדים עכשיו" : ""));
+        for (int i = 0; i < shown.length(); i++) if (shown.optJSONObject(i) != null) all.add(shown.optJSONObject(i));
+        for (JSONObject s : all) if ("working".equals(s.optString("state"))) working++;
+        if (all.isEmpty()) renderEmpty("אין סשנים להצגה");
+        for (int i = 0; i < all.size(); i++) {
+            YugiSwipeRow row = row(all.get(i), now, i < all.size() - 1);
+            rows.add(row);
+            cards.addView(row, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+        refreshStatus(list);
     }
 
-    private View card(JSONObject s, long now) {
+    private void refreshStatus(JSONArray list) {
+        int working = 0, total = 0;
+        JSONArray shown = Hidden.filter(getContext(), list);
+        for (int i = 0; i < shown.length(); i++) {
+            JSONObject o = shown.optJSONObject(i);
+            if (o == null) continue;
+            total++;
+            if ("working".equals(o.optString("state"))) working++;
+        }
+        listStatus.setText(total == 0 ? "אין סשנים פעילים בשרת"
+                : (total == 1 ? "סשן אחד בשרת" : total + " סשנים בשרת") + (working > 0 ? " · " + working + " עובדים עכשיו" : ""));
+        int hidden = Hidden.count(getContext(), list) + (Hidden.isHidden(getContext(), APP_CHAT_NAME) ? 1 : 0);
+        hiddenFooter.setVisibility(hidden > 0 ? VISIBLE : GONE);
+        hiddenFooter.setText(hidden == 1 ? "סשן אחד מוסתר · הצג" : hidden + " סשנים מוסתרים · הצג");
+    }
+
+    /**
+     * One row, Mail-style: area avatar with a live badge, name and time on the first line, the state (and
+     * agents) on the second, the last message on the third. Swiping left reveals its actions.
+     */
+    private YugiSwipeRow row(JSONObject s, long now, boolean separator) {
         Context c = getContext();
         String state = s.optString("state", "waiting");
-        LinearLayout card = new LinearLayout(c);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(YugiTheme.rounded(c, YugiTheme.SURFACE, YugiTheme.RADIUS_M));
-        card.setPadding(dp(14), dp(12), dp(14), dp(12));
-        card.setMinimumHeight(dp(64));
-        card.setClickable(true);
-        card.setFocusable(true);
-        card.setTag("card");
-        card.setContentDescription(s.optString("name") + ", " + stateLabel(state));
+        boolean app = s.optBoolean("app");
+        String name = s.optString("name");
+        LinearLayout face = new LinearLayout(c);
+        face.setOrientation(LinearLayout.HORIZONTAL);
+        face.setLayoutDirection(LAYOUT_DIRECTION_RTL);
+        face.setGravity(Gravity.TOP);
+        face.setBackground(new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(YugiTheme.RIPPLE),
+                new android.graphics.drawable.ColorDrawable(YugiTheme.CARD), new android.graphics.drawable.ColorDrawable(0xFFFFFFFF)));
+        face.setPaddingRelative(dp(14), dp(12), dp(14), dp(12));
+        face.setMinimumHeight(dp(76));
+        face.setClickable(true);
+        face.setTag("card");
+        face.setContentDescription(name + ", " + stateLabel(state));
 
+        YugiAvatar av = new YugiAvatar(c).set(app ? YugiAvatar.YUGI : s.optString("area"), name);
+        av.setRingColor(YugiTheme.CARD);
+        av.setState("waiting".equals(state) ? 0 : stateColor(state), "working".equals(state));
+        face.addView(av, new LinearLayout.LayoutParams(dp(46), dp(46)));
+
+        LinearLayout texts = column(c);
+        texts.setPaddingRelative(dp(12), 0, 0, 0);
         LinearLayout top = new LinearLayout(c);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        View d = dot(c, stateColor(state));
-        top.addView(d, new LinearLayout.LayoutParams(dp(9), dp(9)));
-        TextView name = YugiTheme.text(c, s.optString("name"), 16, 600, YugiTheme.TEXT);
-        name.setMaxLines(1);
-        name.setEllipsize(TextUtils.TruncateAt.END);
-        name.setPadding(dp(8), 0, dp(8), 0);
-        name.setTextDirection(TEXT_DIRECTION_FIRST_STRONG);
-        name.setTextAlignment(TEXT_ALIGNMENT_VIEW_START);
-        top.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        TextView nameT = YugiTheme.text(c, name, 16, 600, YugiTheme.TEXT);
+        nameT.setMaxLines(1);
+        nameT.setEllipsize(TextUtils.TruncateAt.END);
+        nameT.setTextDirection(TEXT_DIRECTION_FIRST_STRONG);
+        nameT.setTextAlignment(TEXT_ALIGNMENT_VIEW_START);
+        top.addView(nameT, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        TextView when = YugiTheme.text(c, ago(s.optLong("updatedAt", 0), now), 13, 400, YugiTheme.TEXT_FAINT);
+        when.setMaxLines(1);
+        when.setPaddingRelative(dp(8), 0, 0, 0);
+        top.addView(when);
+        texts.addView(top, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        StringBuilder st = new StringBuilder(stateLabel(state));
         String area = s.optString("areaLabel", "");
-        String meta = stateLabel(state) + (area.isEmpty() ? "" : " · " + area);
-        TextView metaT = YugiTheme.text(c, meta, 12, 500, "working".equals(state) ? GREEN : "needs".equals(state) ? ORANGE : YugiTheme.TEXT_DIM);
-        metaT.setMaxLines(1);
-        top.addView(metaT);
-        card.addView(top);
+        if (!area.isEmpty()) st.append(" · ").append(area);
+        JSONArray agents = s.optJSONArray("agents");
+        if (agents != null && agents.length() > 0) st.append(" · ").append(agents.length() == 1 ? "סוכן אחד עובד" : agents.length() + " סוכנים עובדים");
+        if (!s.optBoolean("canSend", true)) st.append(" · צפייה בלבד");
+        TextView stateT = YugiTheme.text(c, st.toString(), 13, 500,
+                "working".equals(state) ? GREEN : "needs".equals(state) ? ORANGE : YugiTheme.TEXT_DIM);
+        stateT.setMaxLines(1);
+        stateT.setEllipsize(TextUtils.TruncateAt.END);
+        stateT.setTextAlignment(TEXT_ALIGNMENT_VIEW_START);
+        stateT.setPadding(0, dp(3), 0, 0);
+        texts.addView(stateT, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         JSONObject last = s.optJSONObject("lastMessage");
         if (last != null) {
@@ -495,44 +669,92 @@ public class YugiSessions extends FrameLayout {
             TextView lm = YugiTheme.text(c, who + oneLine(last.optString("text")), 14, 400, YugiTheme.TEXT_DIM);
             lm.setMaxLines(2);
             lm.setEllipsize(TextUtils.TruncateAt.END);
-            lm.setLineSpacing(dp(2), 1f);
+            lm.setLineSpacing(0, 1.2f);
             lm.setTextDirection(TEXT_DIRECTION_FIRST_STRONG);
-            lm.setPadding(0, dp(6), 0, 0);
-            card.addView(lm);
+            lm.setTextAlignment(TEXT_ALIGNMENT_VIEW_START);
+            lm.setPadding(0, dp(5), 0, 0);
+            texts.addView(lm, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+        face.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
+        // hairline separator, inset past the avatar like iOS lists
+        FrameLayout holder = new FrameLayout(c);
+        holder.setLayoutDirection(LAYOUT_DIRECTION_RTL);
+        holder.addView(face, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        if (separator) {
+            View sep = new View(c);
+            sep.setBackgroundColor(0x1AFFFFFF);
+            FrameLayout.LayoutParams slp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, dp(0.5f)), Gravity.BOTTOM);
+            slp.setMarginStart(dp(14 + 46 + 12));
+            holder.addView(sep, slp);
         }
 
-        JSONArray agents = s.optJSONArray("agents");
-        StringBuilder foot = new StringBuilder();
-        if (agents != null && agents.length() > 0) {
-            foot.append(agents.length() == 1 ? "סוכן אחד עובד: " : agents.length() + " סוכנים עובדים: ");
-            for (int k = 0; k < agents.length() && k < 3; k++) {
-                if (k > 0) foot.append(", ");
-                foot.append(agents.optJSONObject(k) != null ? agents.optJSONObject(k).optString("description") : "");
-            }
+        List<YugiSwipeRow.Action> acts = new ArrayList<>();
+        final YugiSwipeRow[] self = new YugiSwipeRow[1];
+        if (app) {
+            acts.add(new YugiSwipeRow.Action("שיחה חדשה", YugiTheme.BRAND, null, null, () -> host.newAppChat()));
+            acts.add(new YugiSwipeRow.Action("הסתר", YugiTheme.GRAY, null, null, () -> hide(self[0], name)));
+        } else if (s.optBoolean("canEnd")) {
+            acts.add(new YugiSwipeRow.Action("הסתר", YugiTheme.GRAY, null, null, () -> hide(self[0], name)));
+            acts.add(new YugiSwipeRow.Action("סיים ומחק", YugiTheme.RED,
+                    "לסיים את \"" + name + "\" ולמחוק אותו מהרשימה?", "סיים ומחק", () -> endSession(self[0], s)));
+        } else {
+            acts.add(new YugiSwipeRow.Action("הסתר", YugiTheme.GRAY, null, null, () -> hide(self[0], name)));
         }
-        long upd = s.optLong("updatedAt", 0);
-        String when = ago(upd, now);
-        if (!s.optBoolean("canSend", true)) when = (when.isEmpty() ? "" : when + " · ") + "צפייה בלבד";
-        LinearLayout bottom = new LinearLayout(c);
-        bottom.setOrientation(LinearLayout.HORIZONTAL);
-        bottom.setGravity(Gravity.CENTER_VERTICAL);
-        bottom.setPadding(0, dp(6), 0, 0);
-        TextView ag = YugiTheme.text(c, foot.toString(), 12, 500, YugiTheme.ACCENT);
-        ag.setMaxLines(1);
-        ag.setEllipsize(TextUtils.TruncateAt.END);
-        bottom.addView(ag, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        TextView wt = YugiTheme.text(c, when, 12, 400, YugiTheme.TEXT_FAINT);
-        wt.setPadding(dp(8), 0, 0, 0);
-        bottom.addView(wt);
-        card.addView(bottom);
-
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.bottomMargin = dp(8);
-        card.setLayoutParams(lp);
-        pressable(card);
-        card.setOnClickListener(v -> openDetail(s));
-        return card;
+        YugiSwipeRow row = new YugiSwipeRow(c, holder, acts);
+        self[0] = row;
+        row.setTag(s.optString("id"));
+        row.setListener(opened -> { for (YugiSwipeRow r : rows) if (r != opened && r.isOpen()) r.setOpen(false, true); });
+        pressable(face);
+        face.setOnClickListener(v -> {
+            if (app) host.onBack();
+            else openDetail(s);
+        });
+        return row;
     }
+
+    /** Hides a row (by name): it folds away, and comes back by itself when that session works again. */
+    private void hide(YugiSwipeRow row, String name) {
+        Hidden.set(getContext(), name, true);
+        host.onHiddenChanged();
+        if (row == null) return;
+        row.collapse(() -> {
+            cards.removeView(row);
+            rows.remove(row);
+            if (lastList != null) refreshStatus(lastList);
+        });
+    }
+
+    /** "סיים ומחק": DELETE /sessions/<id> (the server ends only ad-hoc sessions); the row folds away on success. */
+    private void endSession(YugiSwipeRow row, JSONObject s) {
+        String id = s.optString("id");
+        if (offline) { if (row != null) row.collapse(() -> { cards.removeView(row); rows.remove(row); }); return; }
+        listStatus.setText("מסיים את " + s.optString("name") + "…");
+        http.newCall(req("/sessions/" + id).delete().build()).enqueue(new okhttp3.Callback() {
+            @Override public void onFailure(Call call, java.io.IOException e) {
+                ui.post(() -> listStatus.setText("אין חיבור לשרת. הסשן לא נסגר"));
+            }
+            @Override public void onResponse(Call call, Response r) {
+                int code = r.code();
+                String msg = "";
+                try (Response res = r) {
+                    if (res.body() != null) msg = new JSONObject(res.body().string()).optString("message", "");
+                } catch (Exception ignored) {}
+                final String m = msg;
+                ui.post(() -> {
+                    if (code == 200 && row != null) {
+                        row.collapse(() -> { cards.removeView(row); rows.remove(row); host.refreshList(); });
+                        listStatus.setText("הסשן נסגר");
+                    } else {
+                        listStatus.setText(m.isEmpty() ? "הסשן לא נסגר (" + code + ")" : m);
+                    }
+                });
+            }
+        });
+    }
+
+    /** Tests: the rows of the list. */
+    List<YugiSwipeRow> rowsForTest() { return rows; }
 
     private static String oneLine(String s) { return s.replaceAll("\\s+", " ").trim(); }
 
@@ -543,11 +765,14 @@ public class YugiSessions extends FrameLayout {
         currentId = s.optString("id");
         inDetail = true;
         msgList.removeAllViews();
+        lastRole = null;
+        live = false;
         seenIds.clear();
         pendingBubbles.clear();
         stickToBottom = true;
         input.setText("");
         applySession(s);
+        renderPending();
         TextView loading = YugiTheme.text(getContext(), "טוען את השיחה…", 13, 400, YugiTheme.TEXT_FAINT);
         loading.setGravity(Gravity.CENTER);
         loading.setPadding(0, dp(24), 0, dp(24));
@@ -592,7 +817,9 @@ public class YugiSessions extends FrameLayout {
         JSONArray agents = s.optJSONArray("agents");
         if (agents != null && agents.length() > 0) sub.append(" · ").append(agents.length() == 1 ? "סוכן אחד" : agents.length() + " סוכנים");
         detailSubtitle.setText(sub);
-        tintDot(detailDot, stateColor(state));
+        detailAvatar.set(s.optBoolean("app") ? YugiAvatar.YUGI : s.optString("area"), s.optString("name"));
+        detailAvatar.setState("waiting".equals(state) || "ended".equals(state) ? 0 : stateColor(state), "working".equals(state));
+        detailSubtitle.setTextColor("working".equals(state) ? GREEN : "needs".equals(state) ? ORANGE : YugiTheme.TEXT_DIM);
         boolean canSend = s.optBoolean("canSend", true) && !"ended".equals(state);
         inputBox.setVisibility(canSend ? VISIBLE : GONE);
         readOnlyNote.setVisibility(canSend ? GONE : VISIBLE);
@@ -659,12 +886,15 @@ public class YugiSessions extends FrameLayout {
                 // A reconnect replays the tail: keep what is on screen, add only what is new
                 View loading = msgList.findViewWithTag("loading");
                 if (loading != null) msgList.removeView(loading);
+                live = false;
                 if (items != null) for (int i = 0; i < items.length(); i++) addItem(items.optJSONObject(i));
                 if (msgList.getChildCount() == 0) addSystem("אין עדיין הודעות בסשן הזה");
+                live = true;
                 scrollToEnd();
                 break;
             }
             case "msg":
+                live = true;
                 addItem(d);
                 if (stickToBottom) scrollToEnd();
                 break;
@@ -675,6 +905,7 @@ public class YugiSessions extends FrameLayout {
                 break;
             case "reset":
                 msgList.removeAllViews();
+                lastRole = null;
                 seenIds.clear();
                 addSystem("השיחה בסשן התחילה מחדש");
                 break;
@@ -698,110 +929,153 @@ public class YugiSessions extends FrameLayout {
         String text = it.optString("text");
         if ("user".equals(role)) {
             // My own optimistic bubble: confirm it instead of adding a second one
-            for (TextView p : pendingBubbles) {
-                if (oneLine(String.valueOf(p.getText())).equals(oneLine(text))) {
+            for (Pending p : pendingBubbles) {
+                if (oneLine(p.sent).equals(oneLine(text))) {
                     pendingBubbles.remove(p);
-                    p.animate().alpha(1f).setDuration(180).start();
+                    YugiSpring.to(p.row.view, DynamicAnimation.ALPHA, 1f);
                     return;
                 }
             }
         }
-        addBubble(role, text);
+        addBubble(role, text, null, live);
     }
 
-    private TextView addBubble(String role, String text) {
+    /** Set while the stream delivers live messages (they spring in); the replayed tail doesn't. */
+    private boolean live;
+
+    private YugiMessages.Row addBubble(String role, String text, List<View> atts, boolean animate) {
         Context c = getContext();
-        LinearLayout wrap = new LinearLayout(c);
-        wrap.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams wlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        wlp.topMargin = dp(10);
-        TextView t = YugiTheme.text(c, text, 15, 400, YugiTheme.TEXT);
-        t.setLineSpacing(dp(3), 1f);
-        t.setTextIsSelectable(true);
-        t.setTextDirection(TEXT_DIRECTION_FIRST_STRONG);
-        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        if ("user".equals(role)) {
-            wrap.setGravity(Gravity.START); // RTL: Yagel's messages on the right
-            t.setBackground(YugiTheme.rounded(c, YugiTheme.SURFACE_HI, YugiTheme.RADIUS_M));
-            t.setPadding(dp(14), dp(10), dp(14), dp(10));
-            t.setMaxWidth(dp(300));
-        } else if ("system".equals(role)) {
-            wrap.setGravity(Gravity.CENTER_HORIZONTAL);
-            t.setTextColor(YugiTheme.TEXT_FAINT);
-            t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            t.setTextIsSelectable(false);
-        } else {
-            wrap.setGravity(Gravity.START);
-            t.setPadding(dp(4), dp(2), dp(4), dp(2));
-            tlp.width = ViewGroup.LayoutParams.MATCH_PARENT;
-        }
-        wrap.addView(t, tlp);
-        msgList.addView(wrap, wlp);
+        YugiMessages.Row r = YugiMessages.build(c, role, text, atts);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = YugiMessages.gapBefore(c, lastRole, role);
+        lastRole = role;
+        msgList.addView(r.view, lp);
+        if (animate) YugiMessages.enter(r.view);
         // Trim very long conversations on the phone (the server keeps everything)
         while (msgList.getChildCount() > 300) msgList.removeViewAt(0);
-        return t;
+        return r;
     }
 
-    private void addSystem(String text) { addBubble("system", text); }
+    private void addSystem(String text) { addBubble("system", text, null, true); }
 
     // ---------------------------------------------------------------- send
 
+    /** A message typed here, faint until the session's transcript shows it. */
+    private static final class Pending {
+        final YugiMessages.Row row;
+        final String sent;
+        Pending(YugiMessages.Row row, String sent) { this.row = row; this.sent = sent; }
+    }
+
     private void updateSend() {
-        boolean can = input.getText().toString().trim().length() > 0;
+        boolean can = input.getText().toString().trim().length() > 0 || !YugiChat.pendingAttachments().isEmpty();
         send.setEnabled(can);
         GradientDrawable g = new GradientDrawable();
         g.setShape(GradientDrawable.OVAL);
-        g.setColor(can ? YugiTheme.TEXT : YugiTheme.SURFACE_HI);
+        g.setColor(can ? YugiTheme.BRAND : 0x00000000);
         send.setBackground(g);
-        send.setImageTintList(android.content.res.ColorStateList.valueOf(can ? 0xFF0B0E14 : YugiTheme.TEXT_FAINT));
+        send.setImageTintList(android.content.res.ColorStateList.valueOf(can ? 0xFFFFFFFF : YugiTheme.TEXT_FAINT));
     }
 
     /** The in-app YugiPC keyboard types into this panel's field (Enter sends). */
     void bindKeyboard(YugiFieldKeyboard k) { k.bind(input, this::sendTyped); }
 
-    private void sendTyped() {
-        String text = input.getText().toString().trim();
-        if (text.isEmpty() || currentId == null) return;
-        if (text.startsWith("/")) { addSystem("פקודות עם / לא נשלחות מכאן"); scrollToEnd(); return; }
-        input.setText("");
-        View loading = msgList.findViewWithTag("loading");
-        if (loading != null) msgList.removeView(loading);
-        TextView mine = addBubble("user", text);
-        mine.setAlpha(0.55f); // until the session's transcript shows it
-        pendingBubbles.add(mine);
-        stickToBottom = true;
-        scrollToEnd();
-        if (offline) return;
-        final String id = currentId;
-        JSONObject body = new JSONObject();
-        try { body.put("text", text); } catch (Exception ignored) {}
-        http.newCall(req("/sessions/" + id + "/message")
-                .post(RequestBody.create(body.toString().getBytes(StandardCharsets.UTF_8), MediaType.get("application/json")))
-                .build()).enqueue(new okhttp3.Callback() {
-            @Override public void onFailure(Call call, java.io.IOException e) {
-                ui.post(() -> failed(mine, text, "אין חיבור לשרת. ההודעה לא נשלחה"));
-            }
-            @Override public void onResponse(Call call, Response r) {
-                int code = r.code();
-                String msg = "";
-                try (Response res = r) {
-                    if (res.body() != null) msg = new JSONObject(res.body().string()).optString("message", "");
-                } catch (Exception ignored) {}
-                final String m = msg;
-                ui.post(() -> {
-                    // Delivered. Stays in pendingBubbles so the transcript's echo of it is swallowed.
-                    if (code == 200) mine.animate().alpha(1f).setDuration(180).start();
-                    else if (code == 202) { /* typed in; stays faint until the transcript shows it */ }
-                    else failed(mine, text, (m.isEmpty() ? "ההודעה לא נשלחה (" + code + ")" : m + ". ההודעה לא נשלחה"));
-                });
-            }
-        });
+    /** The shared pending attachments, shown above this session's input. */
+    void renderPending() {
+        attachRow.removeAllViews();
+        for (YugiChat.Attachment a : YugiChat.pendingAttachments()) {
+            View v = host.attachmentView(a);
+            if (v != null) attachRow.addView(v);
+        }
+        attachScroll.setVisibility(attachRow.getChildCount() == 0 ? GONE : VISIBLE);
+        updateSend();
     }
 
-    private void failed(TextView bubble, String text, String why) {
-        pendingBubbles.remove(bubble);
-        View wrap = (View) bubble.getParent();
-        msgList.removeView(wrap);
+    private void sendTyped() {
+        String text = input.getText().toString().trim();
+        List<YugiChat.Attachment> atts = new ArrayList<>(YugiChat.pendingAttachments());
+        if ((text.isEmpty() && atts.isEmpty()) || currentId == null) return;
+        if (text.startsWith("/")) { addSystem("פקודות עם / לא נשלחות מכאן"); scrollToEnd(); return; }
+        input.setText("");
+        YugiChat.clearPending();
+        View loading = msgList.findViewWithTag("loading");
+        if (loading != null) msgList.removeView(loading);
+        List<View> thumbs = new ArrayList<>();
+        for (YugiChat.Attachment a : atts) {
+            View v = host.attachmentView(new YugiChat.Attachment(a.name, a.mime, new byte[0], a.thumb));
+            if (v != null) { stripRemove(v); thumbs.add(v); }
+        }
+        YugiMessages.Row mine = addBubble("user", text, thumbs, true);
+        stickToBottom = true;
+        scrollToEnd();
+        if (offline) { mine.view.setAlpha(0.55f); return; }
+        final String id = currentId;
+        new Thread(() -> {
+            // files first: the server keeps them in the session's area (uploads/) and the message carries the paths
+            StringBuilder msg = new StringBuilder(text);
+            if (!atts.isEmpty()) {
+                msg.append(msg.length() > 0 ? "\n\n" : "").append("קבצים מצורפים מיגל (קרא אותם):");
+                for (YugiChat.Attachment a : atts) {
+                    String path = uploadTo(id, a);
+                    if (path == null) {
+                        ui.post(() -> failed(mine, text, "העלאת הקובץ " + a.name + " נכשלה. ההודעה לא נשלחה"));
+                        return;
+                    }
+                    msg.append("\n- ").append(path);
+                }
+            }
+            String full = msg.toString();
+            Pending p = new Pending(mine, full);
+            ui.post(() -> { mine.view.setAlpha(0.55f); pendingBubbles.add(p); });
+            JSONObject body = new JSONObject();
+            try { body.put("text", full); } catch (Exception ignored) {}
+            http.newCall(req("/sessions/" + id + "/message")
+                    .post(RequestBody.create(body.toString().getBytes(StandardCharsets.UTF_8), MediaType.get("application/json")))
+                    .build()).enqueue(new okhttp3.Callback() {
+                @Override public void onFailure(Call call, java.io.IOException e) {
+                    ui.post(() -> { pendingBubbles.remove(p); failed(mine, text, "אין חיבור לשרת. ההודעה לא נשלחה"); });
+                }
+                @Override public void onResponse(Call call, Response r) {
+                    int code = r.code();
+                    String m = "";
+                    try (Response res = r) {
+                        if (res.body() != null) m = new JSONObject(res.body().string()).optString("message", "");
+                    } catch (Exception ignored) {}
+                    final String why = m;
+                    ui.post(() -> {
+                        // Delivered. Stays in pendingBubbles so the transcript's echo of it is swallowed.
+                        if (code == 200) YugiSpring.to(mine.view, DynamicAnimation.ALPHA, 1f);
+                        else if (code == 202) { /* typed in; stays faint until the transcript shows it */ }
+                        else { pendingBubbles.remove(p); failed(mine, text, (why.isEmpty() ? "ההודעה לא נשלחה (" + code + ")" : why + ". ההודעה לא נשלחה")); }
+                    });
+                }
+            });
+        }, "YugiSessionsSend").start();
+    }
+
+    /** Uploads one attachment for this session; returns the server path or null. Runs off the UI thread. */
+    private static String uploadTo(String id, YugiChat.Attachment a) {
+        try {
+            Request r = req("/sessions/" + id + "/upload?name=" + java.net.URLEncoder.encode(a.name, "UTF-8"))
+                    .post(RequestBody.create(a.data, MediaType.get(a.mime))).build();
+            try (Response res = http.newCall(r).execute()) {
+                if (!res.isSuccessful() || res.body() == null) return null;
+                return new JSONObject(res.body().string()).optString("path", null);
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** A sent message's thumbnails don't keep the remove button. */
+    private static void stripRemove(View v) {
+        View x = v.findViewWithTag("x");
+        if (x != null && x.getParent() instanceof ViewGroup) ((ViewGroup) x.getParent()).removeView(x);
+        if (v instanceof ViewGroup) { v.setPadding(0, 0, 0, 0); ((ViewGroup) v).setTouchDelegate(null); }
+    }
+
+    private void failed(YugiMessages.Row bubble, String text, String why) {
+        msgList.removeView(bubble.view);
         addSystem(why);
         if (input.getText().length() == 0) { input.setText(text); input.setSelection(text.length()); }
         scrollToEnd();
@@ -820,10 +1094,19 @@ public class YugiSessions extends FrameLayout {
     /** Session cards in the list (screen rects relative to this view). */
     List<Rect> cardRects() {
         List<Rect> out = new ArrayList<>();
-        for (int i = 0; i < cards.getChildCount(); i++) {
-            View v = cards.getChildAt(i);
-            if (!"card".equals(v.getTag())) continue;
-            out.add(rectIn(v));
+        for (YugiSwipeRow r : rows) out.add(rectIn(r));
+        return out;
+    }
+
+    /** Problems in the rows: text under the revealed actions, actions smaller than 48dp. */
+    List<String> rowProblems() {
+        List<String> out = new ArrayList<>();
+        for (YugiSwipeRow r : rows) {
+            Rect face = r.contentRect();
+            for (Rect a : r.actionRects()) {
+                if (Rect.intersects(face, a)) out.add("row " + r.getTag() + ": face " + face.toShortString() + " overlaps action " + a.toShortString());
+                if (a.width() < dp(48) || a.height() < dp(48)) out.add("row " + r.getTag() + ": action smaller than 48dp " + a.toShortString());
+            }
         }
         return out;
     }
@@ -868,5 +1151,7 @@ public class YugiSessions extends FrameLayout {
             detailPage.setBackground(null);
             listPage.setVisibility(INVISIBLE);
         }
+        for (int i = 0; i < msgList.getChildCount(); i++) YugiMessages.settle(msgList.getChildAt(i));
+        for (YugiSwipeRow r : rows) r.settleForTest();
     }
 }
