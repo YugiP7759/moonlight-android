@@ -18,6 +18,7 @@ android {
         buildConfigField "String", "SUNSHINE_USER", "\"${System.getenv('SUNSHINE_USER') ?: ''}\""
         buildConfigField "String", "SUNSHINE_PASS", "\"${System.getenv('SUNSHINE_PASS') ?: ''}\""
         buildConfigField "String", "TS_AUTHKEY", "\"${System.getenv('TS_AUTHKEY') ?: ''}\""
+        buildConfigField "String", "YUGI_CHAT_TOKEN", "\"${System.getenv('YUGI_CHAT_TOKEN') ?: ''}\""
 
         // Generate native debug symbols to allow Google Play to symbolicate our native crashes
         ndk.debugSymbolLevel = 'FULL'

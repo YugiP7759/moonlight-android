@@ -50,6 +50,14 @@ public final class YugiTunnel {
                 File dir = new File(ctx.getNoBackupFilesDir(), "tailscale");
                 //noinspection ResultOfMethodCallIgnored
                 dir.mkdirs();
+                try {
+                    // Yugi chat bridge (not in the module's default forwards)
+                    call("addTCPForward", new Class<?>[]{long.class, long.class}, (long) YugiChat.PORT, (long) YugiChat.PORT);
+                } catch (NoSuchMethodException e) {
+                    call("addTCPForward", new Class<?>[]{int.class, int.class}, YugiChat.PORT, YugiChat.PORT);
+                } catch (Throwable t) {
+                    LimeLog.warning("YugiPC tunnel: chat forward: " + t);
+                }
                 call("start", new Class<?>[]{String.class, String.class, String.class},
                         dir.getAbsolutePath(), "", "");
                 started = true;

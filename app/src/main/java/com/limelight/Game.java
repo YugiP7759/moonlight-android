@@ -193,6 +193,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private boolean yugiRestarting;
     private android.widget.ImageView yugiFrozen;
     private int yugiRotation;
+    private com.limelight.yugi.YugiChat yugiChat;
     private boolean connecting = false;
     public boolean connected = false;
     private boolean autoEnterPip = false;
@@ -404,7 +405,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
         if (getIntent().getBooleanExtra(EXTRA_YUGI, false)) {
             // YugiPC: the Android soft keyboard never shows during the stream (physical keyboards still work)
-            getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
+            getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
+                    | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN); // pan only for the Yugi chat field
         }
 
         // Inflate the content
@@ -508,6 +510,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             com.limelight.yugi.YugiNav.attachMenuButton(this, () -> java.util.Arrays.asList(
                     new com.limelight.yugi.YugiNav.Item("המחשב שלי", true, null),
                     new com.limelight.yugi.YugiNav.Item("משחקים", false, this::yugiOpenGames)));
+            yugiChat = com.limelight.yugi.YugiChat.attach(this);
 
             // Fold/unfold or rotation: the window changes size (sometimes without a usable
             // onConfigurationChanged). Watch the real view size and re-stream on any aspect change.
@@ -1781,6 +1784,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     protected void onDestroy() {
+        if (yugiChat != null) yugiChat.release();
         stopMicrophoneCapture();
         super.onDestroy();
 

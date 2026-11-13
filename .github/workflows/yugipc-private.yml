@@ -48,6 +48,7 @@ jobs:
           SUNSHINE_USER: ${{ secrets.SUNSHINE_USER }}
           SUNSHINE_PASS: ${{ secrets.SUNSHINE_PASS }}
           TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+          YUGI_CHAT_TOKEN: ${{ secrets.YUGI_CHAT_TOKEN }}
         run: ./gradlew --no-daemon assembleNonRoot_gameRelease
 
       - name: Collect APK

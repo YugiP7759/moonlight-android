@@ -67,6 +67,7 @@ public class GamesActivity extends Activity {
     private String injectJs;
     private boolean landscape;
     private String layoutKey;
+    private YugiChat chat;
 
     private final Runnable statsTick = new Runnable() {
         @Override
@@ -278,6 +279,7 @@ public class GamesActivity extends Activity {
         buildEditBar();
 
         YugiNav.attachMenuButton(this, this::menuItems);
+        chat = YugiChat.attach(this);
     }
 
     private List<YugiNav.Item> menuItems() {
@@ -490,6 +492,7 @@ public class GamesActivity extends Activity {
     @Override
     protected void onDestroy() {
         ui.removeCallbacksAndMessages(null);
+        if (chat != null) chat.release();
         if (web != null) {
             root.removeView(web);
             web.destroy();
@@ -499,7 +502,9 @@ public class GamesActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (pad.isEditing()) {
+        if (chat != null && chat.isOpen()) {
+            chat.toggle();
+        } else if (pad.isEditing()) {
             pad.setEditing(false);
             pad.loadLayout(layoutKey, landscape);
         } else if (customView != null) {
