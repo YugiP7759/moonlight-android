@@ -548,7 +548,8 @@ public class YugiChat extends FrameLayout {
             chip.addView(ic, new LinearLayout.LayoutParams(dp(20), dp(20)));
             TextView name = YugiTheme.text(c, a.name, 13, 400, YugiTheme.TEXT);
             name.setPadding(dp(8), 0, 0, 0);
-            name.setSingleLine(true);
+            name.setMaxLines(1);
+            name.setMinWidth(dp(40));
             name.setMaxWidth(dp(160));
             name.setEllipsize(android.text.TextUtils.TruncateAt.END);
             name.setTextDirection(TEXT_DIRECTION_FIRST_STRONG);
