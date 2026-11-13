@@ -154,6 +154,12 @@ public class YugiChat extends FrameLayout {
     private final LinearLayout inputBox;
     /** The server's Yugi sessions, shown in place of this conversation (same card). */
     private final YugiSessions sessions;
+    private boolean sessionsWanted;
+    // session chips under the header: Yugi + every server session, a tap or a swipe switches
+    private final HorizontalScrollView chipScroll;
+    private final LinearLayout chipRow;
+    private org.json.JSONArray chipList;
+    private final Runnable chipPoll = this::pollChips;
     // Attachments waiting to be sent (shared: the file picker may outlive the hosting screen)
     private static final List<Attachment> pending = new ArrayList<>();
     /** Set by the file picker: reopen the panel on the next screen that attaches it. */
@@ -322,6 +328,33 @@ public class YugiChat extends FrameLayout {
         sessions.setVisibility(GONE);
         card.sessions = sessions;
         card.addView(sessions);
+        // alpha springs end: a panel that went to 0 leaves the layout
+        YugiSpring.of(sessions, androidx.dynamicanimation.animation.DynamicAnimation.ALPHA).addEndListener((a, c, v, vel) -> {
+            if (!c && !sessionsWanted) {
+                sessions.setVisibility(GONE);
+                sessions.setTranslationY(0);
+                card.requestLayout();
+            } else {
+                card.invalidate();
+            }
+        });
+        YugiSpring.of(card, androidx.dynamicanimation.animation.DynamicAnimation.ALPHA).addEndListener((a, c, v, vel) -> {
+            if (!c && !open) setVisibility(GONE);
+        });
+
+        // ---- session chips ----
+        chipRow = new LinearLayout(ctx);
+        chipRow.setOrientation(LinearLayout.HORIZONTAL);
+        chipRow.setGravity(Gravity.CENTER_VERTICAL);
+        chipRow.setPadding(dp(2), 0, dp(2), 0);
+        chipScroll = new HorizontalScrollView(ctx);
+        chipScroll.setHorizontalScrollBarEnabled(false);
+        chipScroll.setOverScrollMode(OVER_SCROLL_NEVER);
+        chipScroll.addView(chipRow);
+        chipScroll.setVisibility(GONE);
+        card.chips = chipScroll;
+        card.addView(chipScroll);
+        card.swipe = this::swipeChip;
 
         // Keep the card above the keyboard and system bars
         setOnApplyWindowInsetsListener((v, insets) -> {
@@ -345,9 +378,65 @@ public class YugiChat extends FrameLayout {
      * With little room (keyboard open on the cover screen) the header is dropped.
      */
     static final class ChatCard extends ViewGroup {
-        View header, hair, scroll, attach, input, sessions;
+        View header, hair, scroll, attach, input, sessions, chips;
+        interface Swipe { void onSwipe(int step); }
+        Swipe swipe;
+        private float downX, downY;
+        private boolean swiping, swipeIgnored;
 
         private boolean sessionsShown() { return sessions != null && sessions.getVisibility() != GONE; }
+        private int chipsH() { return chips != null && chips.getVisibility() != GONE ? chips.getMeasuredHeight() + dp(6) : 0; }
+        private View content() { return sessionsShown() ? sessions : scroll; }
+
+        /** A horizontal swipe on the conversation switches to the next / previous session chip. */
+        @Override
+        public boolean onInterceptTouchEvent(android.view.MotionEvent e) {
+            if (swipe == null || chips == null || chips.getVisibility() == GONE) return false;
+            switch (e.getActionMasked()) {
+                case android.view.MotionEvent.ACTION_DOWN:
+                    downX = e.getX();
+                    downY = e.getY();
+                    swiping = false;
+                    // not on the chips, the input row or the attachments
+                    swipeIgnored = downY < chips.getBottom() || downY > input.getTop() - dp(4);
+                    return false;
+                case android.view.MotionEvent.ACTION_MOVE: {
+                    if (swipeIgnored) return false;
+                    float dx = e.getX() - downX, dy = e.getY() - downY;
+                    int slop = android.view.ViewConfiguration.get(getContext()).getScaledTouchSlop();
+                    if (Math.abs(dx) > slop * 2 && Math.abs(dx) > Math.abs(dy) * 1.8f) {
+                        swiping = true;
+                        return true;
+                    }
+                    return false;
+                }
+                default:
+                    return false;
+            }
+        }
+
+        @Override
+        public boolean onTouchEvent(android.view.MotionEvent e) {
+            if (!swiping) return super.onTouchEvent(e);
+            float dx = e.getX() - downX;
+            switch (e.getActionMasked()) {
+                case android.view.MotionEvent.ACTION_MOVE:
+                    content().setTranslationX(dx * 0.4f); // the conversation follows the finger, damped
+                    return true;
+                case android.view.MotionEvent.ACTION_UP:
+                case android.view.MotionEvent.ACTION_CANCEL:
+                    swiping = false;
+                    YugiSpring.to(content(), androidx.dynamicanimation.animation.DynamicAnimation.TRANSLATION_X, 0f);
+                    if (e.getActionMasked() == android.view.MotionEvent.ACTION_UP && Math.abs(dx) > dp(64)) {
+                        // RTL: the next chip is to the left, so a drag to the right brings it in
+                        boolean rtl = getLayoutDirection() == LAYOUT_DIRECTION_RTL;
+                        swipe.onSwipe((dx > 0) == rtl ? 1 : -1);
+                    }
+                    return true;
+                default:
+                    return true;
+            }
+        }
 
         ChatCard(Context c) { super(c); }
 
@@ -360,6 +449,10 @@ public class YugiChat extends FrameLayout {
             int innerW = w - getPaddingLeft() - getPaddingRight();
             int avail = h - getPaddingTop() - getPaddingBottom();
             int exactW = MeasureSpec.makeMeasureSpec(innerW, MeasureSpec.EXACTLY);
+            if (chips != null && chips.getVisibility() != GONE) {
+                chips.measure(exactW, MeasureSpec.makeMeasureSpec(dp(38), MeasureSpec.EXACTLY));
+                avail -= chipsH();
+            }
             int atMost = MeasureSpec.makeMeasureSpec(Math.max(0, avail), MeasureSpec.AT_MOST);
             input.measure(exactW, atMost);
             avail -= input.getMeasuredHeight() + dp(4);
@@ -377,14 +470,14 @@ public class YugiChat extends FrameLayout {
             }
             scroll.measure(exactW, MeasureSpec.makeMeasureSpec(Math.max(0, avail), MeasureSpec.EXACTLY));
             if (sessionsShown()) {
-                sessions.measure(exactW, MeasureSpec.makeMeasureSpec(Math.max(0, h - getPaddingTop() - getPaddingBottom()), MeasureSpec.EXACTLY));
+                sessions.measure(exactW, MeasureSpec.makeMeasureSpec(Math.max(0, h - getPaddingTop() - getPaddingBottom() - chipsH()), MeasureSpec.EXACTLY));
             }
         }
 
         @Override
         protected boolean drawChild(android.graphics.Canvas canvas, View child, long drawingTime) {
             // While the sessions panel is fully in, the chat underneath isn't drawn (or seen through it)
-            if (child != sessions && sessionsShown() && sessions.getAlpha() >= 1f) return false;
+            if (child != sessions && child != chips && sessionsShown() && sessions.getAlpha() >= 1f) return false;
             return super.drawChild(canvas, child, drawingTime);
         }
 
@@ -392,6 +485,11 @@ public class YugiChat extends FrameLayout {
         protected void onLayout(boolean changed, int l, int t, int r, int b) {
             int left = getPaddingLeft(), right = (r - l) - getPaddingRight();
             int y = getPaddingTop();
+            if (chips != null && chips.getVisibility() != GONE) {
+                chips.layout(left, y, right, y + chips.getMeasuredHeight());
+                y += chipsH();
+            }
+            int contentTop = y;
             if (header.getVisibility() != GONE) {
                 header.layout(left, y, right, y + header.getMeasuredHeight());
                 y += header.getMeasuredHeight() + dp(6);
@@ -406,7 +504,7 @@ public class YugiChat extends FrameLayout {
                 attach.layout(left, bottom - attach.getMeasuredHeight(), right, bottom);
             }
             if (sessionsShown()) {
-                sessions.layout(left, getPaddingTop(), right, getPaddingTop() + sessions.getMeasuredHeight());
+                sessions.layout(left, contentTop, right, contentTop + sessions.getMeasuredHeight());
             }
         }
     }
@@ -536,26 +634,154 @@ public class YugiChat extends FrameLayout {
 
     /** Swaps the card between this conversation and the sessions list (crossfade with a small rise). */
     public void showSessions(boolean show) {
-        boolean now = sessions.getVisibility() == VISIBLE;
-        if (show == now) return;
+        if (show == sessionsWanted) return;
+        sessionsWanted = show;
         if (show) {
             hideKeyboard();
-            sessions.setVisibility(VISIBLE);
-            sessions.setAlpha(0f);
-            sessions.setTranslationY(dp(12));
-            sessions.animate().alpha(1f).translationY(0).setDuration(180)
-                    .setInterpolator(new android.view.animation.DecelerateInterpolator(2f)).withEndAction(card::invalidate).start();
+            if (sessions.getVisibility() != VISIBLE) {
+                sessions.setVisibility(VISIBLE);
+                sessions.setAlpha(0f);
+                sessions.setTranslationY(dp(12));
+            }
+            YugiSpring.to(sessions, androidx.dynamicanimation.animation.DynamicAnimation.ALPHA, 1f);
+            YugiSpring.to(sessions, androidx.dynamicanimation.animation.DynamicAnimation.TRANSLATION_Y, 0f);
             sessions.setShown(open);
         } else {
             sessions.setShown(false);
-            sessions.setAlpha(0.99f); // draw the chat underneath while fading out
-            sessions.animate().alpha(0f).translationY(dp(8)).setDuration(140)
-                    .withEndAction(() -> { sessions.setVisibility(GONE); sessions.setTranslationY(0); card.requestLayout(); }).start();
+            if (sessions.getAlpha() >= 1f) sessions.setAlpha(0.99f); // draw the chat underneath while fading out
+            YugiSpring.to(sessions, androidx.dynamicanimation.animation.DynamicAnimation.ALPHA, 0f);
+            YugiSpring.to(sessions, androidx.dynamicanimation.animation.DynamicAnimation.TRANSLATION_Y, dp(8));
         }
+        renderChips();
         card.requestLayout();
     }
 
-    public boolean isSessionsShown() { return sessions.getVisibility() == VISIBLE; }
+    public boolean isSessionsShown() { return sessionsWanted; }
+
+    // ---------------------------------------------------------------- session chips
+
+    private void pollChips() {
+        removeCallbacks(chipPoll);
+        if (!open) return;
+        YugiSessions.fetchList(list -> {
+            if (list != null) { chipList = list; renderChips(); }
+            if (open) postDelayed(chipPoll, 4000);
+        });
+    }
+
+    /** Chip order: Yugi first, then the server's sessions. Null id = Yugi's own conversation. */
+    private java.util.List<String> chipIds() {
+        java.util.List<String> ids = new java.util.ArrayList<>();
+        ids.add(null);
+        if (chipList != null) for (int i = 0; i < chipList.length(); i++) {
+            JSONObject o = chipList.optJSONObject(i);
+            if (o != null) ids.add(o.optString("id"));
+        }
+        return ids;
+    }
+
+    private String activeChip() { return sessionsWanted ? sessions.currentId() : null; }
+
+    private boolean chipActive(String id) {
+        return id == null ? !sessionsWanted : sessionsWanted && id.equals(sessions.currentId());
+    }
+
+    private void renderChips() {
+        boolean has = chipList != null && chipList.length() > 0;
+        if ((chipScroll.getVisibility() == VISIBLE) != has) {
+            chipScroll.setVisibility(has ? VISIBLE : GONE);
+            if (has) {
+                chipScroll.setAlpha(0f);
+                YugiSpring.to(chipScroll, androidx.dynamicanimation.animation.DynamicAnimation.ALPHA, 1f);
+            }
+            card.requestLayout();
+        }
+        chipRow.removeAllViews();
+        if (!has) return;
+        addChip(null, "יוגי", YugiTheme.ACCENT);
+        for (int i = 0; i < chipList.length(); i++) {
+            JSONObject o = chipList.optJSONObject(i);
+            if (o == null) continue;
+            addChip(o.optString("id"), o.optString("name"), YugiSessions.stateColor(o.optString("state", "waiting")));
+        }
+    }
+
+    private void addChip(String id, String name, int dotColor) {
+        Context c = getContext();
+        boolean on = chipActive(id);
+        LinearLayout chip = new LinearLayout(c);
+        chip.setOrientation(LinearLayout.HORIZONTAL);
+        chip.setGravity(Gravity.CENTER_VERTICAL);
+        chip.setPadding(dp(12), 0, dp(14), 0);
+        chip.setBackground(on ? YugiTheme.rounded(c, YugiTheme.SURFACE_HI, 17)
+                : YugiTheme.roundedStroke(c, 0x00000000, 17, YugiTheme.STROKE));
+        View dot = new View(c);
+        GradientDrawable g = new GradientDrawable();
+        g.setShape(GradientDrawable.OVAL);
+        g.setColor(dotColor);
+        dot.setBackground(g);
+        chip.addView(dot, new LinearLayout.LayoutParams(dp(7), dp(7)));
+        TextView t = YugiTheme.text(c, name, 13, on ? 600 : 500, on ? YugiTheme.TEXT : YugiTheme.TEXT_DIM);
+        t.setMaxLines(1);
+        t.setPadding(dp(7), 0, 0, 0);
+        t.setTextDirection(TEXT_DIRECTION_FIRST_STRONG);
+        chip.addView(t);
+        chip.setContentDescription(name);
+        chip.setSelected(on);
+        chip.setOnClickListener(v -> {
+            java.util.List<String> ids = chipIds();
+            int from = ids.indexOf(activeChip()), to = ids.indexOf(id);
+            switchChip(id, to >= from ? 1 : -1);
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(34));
+        lp.setMarginEnd(dp(6));
+        chipRow.addView(chip, lp);
+        if (on) chipRow.post(() -> chipScroll.smoothScrollTo(
+                Math.max(0, chip.getLeft() - (chipScroll.getWidth() - chip.getWidth()) / 2), 0));
+    }
+
+    /** Tests: chips for these sessions, and a swipe as the card would report it. */
+    void setChipsForTest(org.json.JSONArray l) { chipList = l; renderChips(); }
+    void swipeForTest(int step) { swipeChip(step); }
+    Rect chipsRect() { return new Rect(card.getLeft() + chipScroll.getLeft(), card.getTop() + chipScroll.getTop(),
+            card.getLeft() + chipScroll.getRight(), card.getTop() + chipScroll.getBottom()); }
+
+    private void swipeChip(int step) {
+        java.util.List<String> ids = chipIds();
+        int i = ids.indexOf(activeChip());
+        int j = i + step;
+        if (i < 0 || j < 0 || j >= ids.size()) return;
+        switchChip(ids.get(j), step);
+    }
+
+    /** Switches the card to Yugi (null) or to a server session, with a slide in the swipe direction. */
+    private void switchChip(String id, int step) {
+        if (chipActive(id)) return;
+        performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK);
+        boolean rtl = card.getLayoutDirection() == LAYOUT_DIRECTION_RTL;
+        float from = (rtl ? -step : step) * card.getWidth() * 0.3f;
+        if (id == null) {
+            showSessions(false);
+            slideIn(scroll, from);
+        } else {
+            JSONObject s = null;
+            if (chipList != null) for (int i = 0; i < chipList.length(); i++) {
+                JSONObject o = chipList.optJSONObject(i);
+                if (o != null && id.equals(o.optString("id"))) { s = o; break; }
+            }
+            if (s == null) return;
+            boolean was = sessionsWanted;
+            showSessions(true);
+            sessions.openDetail(s);
+            if (was) slideIn(sessions, from);
+        }
+        renderChips();
+    }
+
+    private static void slideIn(View v, float from) {
+        v.setTranslationX(from);
+        YugiSpring.to(v, androidx.dynamicanimation.animation.DynamicAnimation.TRANSLATION_X, 0f);
+    }
 
     /** For previews/tests: the sessions panel. */
     YugiSessions sessionsForTest() { return sessions; }
@@ -566,30 +792,37 @@ public class YugiChat extends FrameLayout {
         open = o;
         if (fab != null) fab.setShown(!o);
         if (o) {
-            setVisibility(VISIBLE);
-            card.setAlpha(0f);
-            card.setTranslationX(dp(24) * (getLayoutDirection() == LAYOUT_DIRECTION_RTL ? -1 : 1));
-            card.animate().alpha(1f).translationX(0).setDuration(160).start();
+            if (getVisibility() != VISIBLE) {
+                setVisibility(VISIBLE);
+                card.setAlpha(0f);
+                card.setTranslationX(dp(24) * (getLayoutDirection() == LAYOUT_DIRECTION_RTL ? -1 : 1));
+            }
+            YugiSpring.to(card, androidx.dynamicanimation.animation.DynamicAnimation.ALPHA, 1f);
+            YugiSpring.to(card, androidx.dynamicanimation.animation.DynamicAnimation.TRANSLATION_X, 0f);
+            pollChips();
             if (!historyLoaded) loadHistory();
-            if (sessions.getVisibility() == VISIBLE) sessions.setShown(true);
+            if (sessionsWanted) sessions.setShown(true);
             if (host != null && tight()) host.onKeyboard(true); // the toolbar makes room
             if (compactAttachments != tight()) { compactAttachments = tight(); renderPending(); }
             scrollToEnd();
             requestApplyInsets();
             // typing goes to the chat at once: the field takes the focus and its keyboard comes up
-            if (sessions.getVisibility() != VISIBLE) post(this::focusInput);
+            if (!sessionsWanted) post(this::focusInput);
         } else {
             hideKeyboard();
             sessions.setShown(false);
             if (host != null) host.onKeyboard(false);
             stopListening();
             if (tts != null) tts.stop();
-            card.animate().alpha(0f).setDuration(120).withEndAction(() -> setVisibility(GONE)).start();
+            removeCallbacks(chipPoll);
+            YugiSpring.to(card, androidx.dynamicanimation.animation.DynamicAnimation.ALPHA, 0f);
+            YugiSpring.to(card, androidx.dynamicanimation.animation.DynamicAnimation.TRANSLATION_X,
+                    dp(12) * (getLayoutDirection() == LAYOUT_DIRECTION_RTL ? -1 : 1));
         }
     }
 
     private void focusInput() {
-        if (!open || sessions.getVisibility() == VISIBLE) return;
+        if (!open || sessionsWanted) return;
         input.requestFocus();
         if (fieldKb != null) fieldKb.show(input);
     }

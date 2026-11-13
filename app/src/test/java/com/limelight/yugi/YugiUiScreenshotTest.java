@@ -164,6 +164,7 @@ public class YugiUiScreenshotTest {
             @Override public void onKeyboard(boolean shown) { pcChrome.setChromeVisible(!shown); }
         });
         chat.rerenderForTest();
+        chat.setChipsForTest(new org.json.JSONArray(SESSIONS_JSON)); // session chips under the header
         chat.addPendingForTest("screenshot-1412.jpg", "image/jpeg", new byte[0], thumb(a));
         chat.addPendingForTest("הצעת מחיר.pdf", "application/pdf", new byte[0], null);
         pc.addView(chat, match());
@@ -204,6 +205,12 @@ public class YugiUiScreenshotTest {
         layout(pc, w, h);
         checkSessionDetail("session", chat, ss, w, h, 0, problems);
         save(pc, name + "-h2-session");
+        // the chips stay above the session page and never cover it
+        Rect chipsR = chat.chipsRect();
+        Rect ssR = new Rect(chat.cardRect().left + ss.getLeft(), chat.cardRect().top + ss.getTop(),
+                chat.cardRect().left + ss.getRight(), chat.cardRect().top + ss.getBottom());
+        if (chipsR.height() < dp(a, 30)) problems.add("chips too small " + chipsR.toShortString());
+        if (Rect.intersects(chipsR, ssR)) problems.add("chips overlap the session page " + chipsR.toShortString() + " " + ssR.toShortString());
 
         chat.setInsets(ime, 0);
         layout(pc, w, h);

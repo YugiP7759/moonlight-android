@@ -388,6 +388,27 @@ public class YugiSessions extends FrameLayout {
         return new Request.Builder().url(base() + path).header("Authorization", "Bearer " + BuildConfig.YUGI_CHAT_TOKEN);
     }
 
+    public interface ListCallback { void onList(JSONArray sessions); }
+
+    /** One /sessions fetch for the chat's session chips (null on failure; callback on the UI thread). */
+    static void fetchList(ListCallback cb) {
+        Handler h = new Handler(Looper.getMainLooper());
+        http.newCall(req("/sessions").get().build()).enqueue(new okhttp3.Callback() {
+            @Override public void onFailure(Call call, java.io.IOException e) { h.post(() -> cb.onList(null)); }
+            @Override public void onResponse(Call call, Response r) {
+                JSONArray arr = null;
+                try (Response res = r) {
+                    if (res.isSuccessful() && res.body() != null) arr = new JSONObject(res.body().string()).optJSONArray("sessions");
+                } catch (Exception ignored) {}
+                final JSONArray list = arr;
+                h.post(() -> cb.onList(list));
+            }
+        });
+    }
+
+    /** Id of the session open in the detail page, or null. */
+    String currentId() { return inDetail ? currentId : null; }
+
     private void pollList() {
         ui.removeCallbacks(pollTask);
         if (!shown || inDetail || offline) return;
