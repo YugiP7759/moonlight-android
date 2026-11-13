@@ -11,6 +11,7 @@ final class YugiKbdFocus {
     interface Owner {
         void yieldKeyboard();
         boolean isShown();
+        android.app.Activity ownerActivity();
     }
 
     private static WeakReference<Owner> current = new WeakReference<>(null);
@@ -20,7 +21,7 @@ final class YugiKbdFocus {
     static void claim(Owner o) {
         Owner prev = current.get();
         current = new WeakReference<>(o);
-        if (prev != null && prev != o && prev.isShown()) prev.yieldKeyboard();
+        if (prev != null && prev != o && prev.isShown() && prev.ownerActivity() == o.ownerActivity()) prev.yieldKeyboard();
     }
 
     static void release(Owner o) { if (current.get() == o) current = new WeakReference<>(null); }
@@ -28,6 +29,7 @@ final class YugiKbdFocus {
     /** Another keyboard is up (the desktop keyboard should not pop up over the chat's). */
     static boolean heldByOther(Owner o) {
         Owner c = current.get();
-        return c != null && c != o && c.isShown();
+        // only a keyboard up on the same screen counts (another activity is not visible)
+        return c != null && c != o && c.isShown() && c.ownerActivity() == o.ownerActivity();
     }
 }

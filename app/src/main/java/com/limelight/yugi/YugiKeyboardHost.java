@@ -180,6 +180,8 @@ public final class YugiKeyboardHost implements YugiEvents.Listener, YugiKeyboard
     }
 
     /** The in-app keyboard (chat) took the screen. */
+    @Override public android.app.Activity ownerActivity() { return activity; }
+
     @Override public void yieldKeyboard() {
         autoShown = false;
         hide();

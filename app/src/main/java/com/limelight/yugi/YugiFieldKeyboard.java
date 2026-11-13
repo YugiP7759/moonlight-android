@@ -131,6 +131,8 @@ public final class YugiFieldKeyboard implements YugiKeyboard.Host, YugiKbdFocus.
         if (insetListener != null) insetListener.onShown(false);
     }
 
+    @Override public android.app.Activity ownerActivity() { return activity; }
+
     @Override public void yieldKeyboard() { hide(); }
 
     /** Call from the activity's onDestroy (or when the field goes away). */
