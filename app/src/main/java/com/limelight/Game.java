@@ -3619,6 +3619,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         // an in-app field (the Yugi chat) with the focus takes the typing; the desktop keyboard stays down
         getWindow().getDecorView().getViewTreeObserver().addOnGlobalFocusChangeListener((oldFocus, newFocus) -> {
             if (yugiKeys != null) yugiKeys.setAppFieldFocused(newFocus instanceof android.widget.EditText);
+            // the chat closed (its field let go): hardware keys belong to the desktop again
+            if (newFocus == null && oldFocus instanceof android.widget.EditText && streamContainer != null) {
+                streamContainer.post(() -> { if (getCurrentFocus() == null) streamContainer.requestFocus(); });
+            }
         });
         yugiAttachPlayer();
         yugiKeys.start();
