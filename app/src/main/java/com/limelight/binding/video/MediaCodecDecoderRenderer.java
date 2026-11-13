@@ -184,6 +184,8 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
     private long lastNetDataNum;
     private LinkedBlockingQueue<Integer> outputBufferQueue = new LinkedBlockingQueue<>();
     private static final int OUTPUT_BUFFER_QUEUE_LIMIT = 2;
+    /** Render thread: how long to block for the next output frame after a miss (returns early on a frame). */
+    private static final int IDLE_OUTPUT_WAIT_US = 16000;
     private long lastRenderedFrameTimeNanos;
     private HandlerThread choreographerHandlerThread;
     private Handler choreographerHandler;
@@ -1207,12 +1209,13 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
                 double ewmaJitterNs            = periodNs * 0.1;
 
                 BufferInfo info = new BufferInfo();
+                // One reusable BufferInfo for the drain below (it used to be allocated on every loop pass)
+                final BufferInfo __tmpInfo = new BufferInfo();
                 long lastOutputNs = System.nanoTime();
                 while (!stopping) {
                     /* LATEST_ONLY_LOW_LATENCY */
                     if (!preferLowerDelays) {
                         try {
-                            android.media.MediaCodec.BufferInfo __tmpInfo = new android.media.MediaCodec.BufferInfo();
                             int __idx = videoDecoder.dequeueOutputBuffer(__tmpInfo, 0);
                             int __last = -1;
                             long __lastPtsUs = -1L;
@@ -1252,10 +1255,11 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
                         int outIndex = videoDecoder.dequeueOutputBuffer(info, getOutputDequeueTimeoutUs());
 
                         if (outIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                            // reduced backoff 0–500 µs
+                            // Battery: block until the next frame instead of re-polling every 250-500 us.
+                            // dequeueOutputBuffer() returns as soon as a buffer is ready, so the longer wait
+                            // adds no latency; it only cuts the idle loop from ~400 wakeups/s to about one per frame.
                             tryAgainStreak++;
-                            int backoffUs = (tryAgainStreak <= 2) ? 250 : 500;
-                            outIndex = videoDecoder.dequeueOutputBuffer(info, backoffUs);
+                            outIndex = videoDecoder.dequeueOutputBuffer(info, IDLE_OUTPUT_WAIT_US);
                         } else {
                             tryAgainStreak = 0;
                         }

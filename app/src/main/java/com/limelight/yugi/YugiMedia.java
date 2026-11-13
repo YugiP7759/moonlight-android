@@ -17,7 +17,11 @@ public final class YugiMedia {
 
     private static volatile Bridge bridge;
     private static boolean micOn = true;
-    private static boolean camOn = true;
+    /**
+     * Camera starts off: a 720p30 capture + H.264 encode + ~2.5 Mbps uplink for the whole session was the
+     * biggest battery cost. The toolbar's camera button turns it on when a desktop app needs it.
+     */
+    private static boolean camOn = false;
 
     private YugiMedia() {}
 

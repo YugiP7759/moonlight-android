@@ -459,6 +459,9 @@ public class YugiLauncher extends Activity {
                 .putString("list_video_scale_mode", "stretch")
                 .putBoolean("checkbox_full_screen", true)
                 .putBoolean("checkbox_unlock_fps", s.fps > 60)
+                // Battery: a 60 FPS stream asks the panel for 60 Hz (not 120). Our UI animations still vote
+                // for 120 Hz on their own layers, so springs and touch stay at the high rate.
+                .putBoolean("checkbox_reduce_refresh_rate", true)
                 .putBoolean("checkbox_enable_microphone", false)
                 .putBoolean("checkbox_enable_quit_dialog", false)
                 .putInt("seekbar_bitrate_kbps", s.fps > 60 ? YugiConfig.BITRATE_120_KBPS : YugiConfig.BITRATE_60_KBPS)
