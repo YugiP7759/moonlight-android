@@ -114,6 +114,7 @@
         <activity
             android:name=".yugi.YugiLauncher"
             android:exported="true"
+            android:screenOrientation="fullSensor"
             android:label="YugiPC"
             android:resizeableActivity="true"
             android:launchMode="singleTask"

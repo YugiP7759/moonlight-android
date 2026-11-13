@@ -1191,7 +1191,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private void setPreferredOrientationForActivity() {
         if (yugi) {
             // YugiPC: always follow the device; a size change triggers a seamless re-stream
-            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_USER);
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
             return;
         }
         Display display = getActiveDisplay(Game.this, prefConfig);
