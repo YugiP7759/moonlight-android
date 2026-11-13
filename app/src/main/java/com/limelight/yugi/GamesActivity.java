@@ -59,6 +59,7 @@ public class GamesActivity extends Activity {
     private VirtualPadView pad;
     private TextView statsView;
     private View editButton;
+    private TextView padToggle;
     private LinearLayout editBar;
     private SeekBar sizeBar, alphaBar;
     private View customView;
@@ -276,6 +277,22 @@ public class GamesActivity extends Activity {
         editButton = edit;
         editButton.setVisibility(pad.isPadEnabled() ? View.VISIBLE : View.GONE);
 
+        // Pad toggle: small fixed button left of the edit button; stays (faded) when the pad is hidden
+        padToggle = new TextView(this);
+        padToggle.setText("\uD83C\uDFAE");
+        padToggle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        padToggle.setGravity(Gravity.CENTER);
+        GradientDrawable tbg = new GradientDrawable();
+        tbg.setShape(GradientDrawable.OVAL);
+        tbg.setColor(0x66000000);
+        padToggle.setBackground(tbg);
+        padToggle.setOnClickListener(v -> { if (!pad.isEditing()) togglePad(); });
+        FrameLayout.LayoutParams tlp = new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        tlp.topMargin = dp(8);
+        tlp.rightMargin = dp(56); // centre 56dp left of the edit button's centre
+        root.addView(padToggle, tlp);
+        updatePadToggle();
+
         buildEditBar();
 
         YugiNav.attachMenuButton(this, this::menuItems);
@@ -298,8 +315,15 @@ public class GamesActivity extends Activity {
         boolean on = !pad.isPadEnabled();
         pad.setPadEnabled(on);
         editButton.setVisibility(on ? View.VISIBLE : View.GONE);
+        updatePadToggle();
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("pad", on).apply();
         applyPageSettings();
+    }
+
+    private void updatePadToggle() {
+        boolean on = pad.isPadEnabled();
+        padToggle.setAlpha(on ? 0.45f : 0.3f);
+        padToggle.setContentDescription(on ? "הסתר שלט" : "הצג שלט");
     }
 
     private void toggleFit() {
