@@ -41,6 +41,19 @@ public final class YugiOverlay {
         b.setAlpha(on ? 0.75f : 1f);
     }
 
+    /** Small floating button (bottom corner) that opens the phone's keyboard. */
+    public static View attachKeyboardButton(Activity a, Runnable toggleKeyboard) {
+        ImageButton kb = button(a, com.limelight.R.drawable.yugipc_ic_keyboard, "מקלדת");
+        kb.setAlpha(0.7f);
+        kb.setOnClickListener(v -> toggleKeyboard.run());
+        int size = dp(a, 48);
+        FrameLayout.LayoutParams flp = new FrameLayout.LayoutParams(size, size, Gravity.BOTTOM | Gravity.END);
+        flp.rightMargin = dp(a, 12);
+        flp.bottomMargin = dp(a, 72);
+        a.addContentView(kb, flp);
+        return kb;
+    }
+
     /** Adds the buttons to the activity's content root. Returns the container (for hiding in PiP). */
     public static View attach(Activity a) {
         LinearLayout bar = new LinearLayout(a);

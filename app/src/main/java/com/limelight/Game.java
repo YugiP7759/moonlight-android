@@ -370,6 +370,12 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             prefConfig.autoInvertVideoResolution = false;
             prefConfig.videoScaleMode = PreferenceConfiguration.ScaleMode.STRETCH;
             prefConfig.enableMicrophone = false; // mic/camera go through the WHIP side channel
+            prefConfig.disableWarnings = true;     // no "slow connection" style messages
+            prefConfig.enableMultiTouchScreen = false; // direct touch-as-mouse (mode 1)
+            prefConfig.touchscreenTrackpad = false;
+            prefConfig.enableFloatingButton = false;
+            prefConfig.bitrate = prefConfig.fps > 60
+                    ? com.limelight.yugi.YugiConfig.BITRATE_120_KBPS : com.limelight.yugi.YugiConfig.BITRATE_60_KBPS;
         }
         tombstonePrefs = Game.this.getSharedPreferences("DecoderTombstone", 0);
 
@@ -490,6 +496,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             if (com.limelight.yugi.YugiMedia.isAvailable()) {
                 com.limelight.yugi.YugiOverlay.attach(this);
             }
+            com.limelight.yugi.YugiOverlay.attachKeyboardButton(this, this::toggleKeyboard);
             com.limelight.yugi.YugiFps.reset(() -> runOnUiThread(this::yugiRestart));
         }
 

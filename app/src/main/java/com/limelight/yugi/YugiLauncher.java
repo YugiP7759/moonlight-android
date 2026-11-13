@@ -433,7 +433,10 @@ public class YugiLauncher extends Activity {
                 .putBoolean("checkbox_unlock_fps", s.fps > 60)
                 .putBoolean("checkbox_enable_microphone", false)
                 .putBoolean("checkbox_enable_quit_dialog", false)
-                .remove("seekbar_bitrate_kbps") // let Moonlight pick the default bitrate for this size/FPS
+                .putInt("seekbar_bitrate_kbps", s.fps > 60 ? YugiConfig.BITRATE_120_KBPS : YugiConfig.BITRATE_60_KBPS)
+                .putString("mouse_mode_list", YugiConfig.MOUSE_MODE)
+                .putBoolean("checkbox_disable_warnings", true)
+                .putBoolean("checkbox_enable_floating_button", false)
                 .apply();
     }
 

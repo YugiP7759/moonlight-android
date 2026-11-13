@@ -38,6 +38,16 @@ public final class YugiConfig {
      */
     public static final boolean FPS_AUTO_FALLBACK = false;
 
+    /** Fixed bitrates (kbps): not Moonlight's automatic high default. */
+    public static final int BITRATE_60_KBPS = 10000;
+    public static final int BITRATE_120_KBPS = 15000;
+
+    /**
+     * Moonlight mouse mode "1" (normal mouse / direct touch): tap = click where touched, drag = drag,
+     * second finger = scroll, long press = right click.
+     */
+    public static final String MOUSE_MODE = "1";
+
     /** Extra global multiplier on top of the per-screen scale (1.0 = as measured). */
     public static final float RES_SCALE = 1.0f;
 
