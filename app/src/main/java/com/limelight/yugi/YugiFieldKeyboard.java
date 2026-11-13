@@ -36,11 +36,12 @@ public final class YugiFieldKeyboard implements YugiKeyboard.Host, YugiKbdFocus.
     private final YugiKeyEngine engine;
     private final YugiKeyboard kb;
     private final YugiVoice voice;
-    private InsetListener insetListener;
+    private final java.util.List<InsetListener> insetListeners = new java.util.ArrayList<>();
 
     private final java.util.Map<EditText, YugiEditTextSender> senders = new java.util.WeakHashMap<>();
     private EditText field;
-    private YugiEditTextSender sender;
+    private YugiKeyEngine.Sender sender;
+    private Runnable onExternalHidden;
 
     private final FloatValueHolder revealValue = new FloatValueHolder(0f);
     private final SpringAnimation reveal;
@@ -59,6 +60,8 @@ public final class YugiFieldKeyboard implements YugiKeyboard.Host, YugiKbdFocus.
             @Override public void key(int code, boolean down, int mods) { if (sender != null) sender.key(code, down, mods); }
         });
         engine.hebrew = true; // the chat is in Hebrew
+        // the phone's keyboard can never show in this window (WebView fields included): ours does the typing
+        a.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);
         kb = new YugiKeyboard(a, engine, this);
         kb.setVisibility(View.GONE);
         kb.setElevation(YugiTheme.dp(a, 20)); // above the chat card
@@ -78,7 +81,28 @@ public final class YugiFieldKeyboard implements YugiKeyboard.Host, YugiKbdFocus.
         });
     }
 
-    public void setInsetListener(InsetListener l) { insetListener = l; }
+    public void setInsetListener(InsetListener l) { addInsetListener(l); }
+    public void addInsetListener(InsetListener l) { if (!insetListeners.contains(l)) insetListeners.add(l); }
+
+    /** The window has one field keyboard: the chat's, or a new one. */
+    public static YugiFieldKeyboard forActivity(Activity a, YugiChat chat) {
+        return chat != null && chat.fieldKeyboard() != null ? chat.fieldKeyboard() : attach(a);
+    }
+
+    /**
+     * Shows the keyboard for a target that is not an EditText (a web page field): keys go to
+     * {@code s}; {@code onHidden} runs when the keyboard goes down.
+     */
+    public void showExternal(YugiKeyEngine.Sender s, Runnable onHidden) {
+        if (field != null && voice.isActive()) voice.cancel();
+        field = null;
+        sender = s;
+        onExternalHidden = onHidden;
+        reveal();
+    }
+
+    /** True while a web/other target (not an EditText) has the keyboard. */
+    public boolean isExternal() { return wantShown && field == null; }
 
     /** The field types with this keyboard only; Enter (and Esc) go to {@code actions}. */
     public void bind(EditText et, YugiEditTextSender.Actions actions) {
@@ -104,10 +128,15 @@ public final class YugiFieldKeyboard implements YugiKeyboard.Host, YugiKbdFocus.
         if (field != et && voice.isActive()) voice.cancel();
         field = et;
         sender = snd;
+        onExternalHidden = null;
         if (!et.hasFocus()) et.requestFocus();
         // belt and braces: the phone keyboard never shows over ours
         InputMethodManager imm = (InputMethodManager) activity.getSystemService(Context.INPUT_METHOD_SERVICE);
         if (imm != null) imm.hideSoftInputFromWindow(et.getWindowToken(), 0);
+        reveal();
+    }
+
+    private void reveal() {
         if (wantShown) return;
         YugiKbdFocus.claim(this);
         wantShown = true;
@@ -116,7 +145,7 @@ public final class YugiFieldKeyboard implements YugiKeyboard.Host, YugiKbdFocus.
             kb.setTranslationY(kb.preferredHeight(rootWidth(), rootHeight()));
         }
         reveal.animateToFinalPosition(1f);
-        if (insetListener != null) insetListener.onShown(true);
+        for (InsetListener l : insetListeners) l.onShown(true);
     }
 
     public void hide() {
@@ -128,7 +157,10 @@ public final class YugiFieldKeyboard implements YugiKeyboard.Host, YugiKbdFocus.
         YugiKbdFocus.release(this);
         kb.releaseAll();
         reveal.animateToFinalPosition(0f);
-        if (insetListener != null) insetListener.onShown(false);
+        for (InsetListener l : insetListeners) l.onShown(false);
+        Runnable r = onExternalHidden;
+        onExternalHidden = null;
+        if (r != null) r.run();
     }
 
     @Override public android.app.Activity ownerActivity() { return activity; }
@@ -155,7 +187,8 @@ public final class YugiFieldKeyboard implements YugiKeyboard.Host, YugiKbdFocus.
         float t = Math.max(0f, Math.min(1f, revealValue.getValue()));
         int h = kb.getHeight() > 0 ? kb.getHeight() : kb.preferredHeight(rootWidth(), rootHeight());
         kb.setTranslationY((1f - t) * h);
-        if (insetListener != null) insetListener.onKeyboardInset(Math.round(kb.pushHeight() * t));
+        int px = Math.round(kb.pushHeight() * t);
+        for (InsetListener l : insetListeners) l.onKeyboardInset(px);
     }
 
     // ---------------------------------------------------------------- YugiKeyboard.Host
@@ -173,7 +206,22 @@ public final class YugiFieldKeyboard implements YugiKeyboard.Host, YugiKbdFocus.
     @Override
     public void onMicRequested(boolean hebrew) {
         if (voice.isActive()) { voice.stop(); return; }
-        if (field == null) return;
+        if (field == null) {
+            // a web field: nothing can be taken back, so the live words show above the keys
+            if (sender == null) return;
+            final YugiKeyEngine.Sender out = sender;
+            voice.start(hebrew, new YugiVoice.Listener() {
+                @Override public void onListening(boolean on) { kb.setListening(on); }
+                @Override public void onLevel(float level) { kb.setVoiceLevel(level); }
+                @Override public void onPartial(String text) { kb.setVoicePreview(text); }
+                @Override public void onFinal(String text) { kb.setVoicePreview(null); if (!text.isEmpty()) out.text(text); }
+                @Override public void onProblem(String message) {
+                    kb.setListening(false);
+                    android.widget.Toast.makeText(activity, message, android.widget.Toast.LENGTH_SHORT).show();
+                }
+            });
+            return;
+        }
         voiceAnchor = -1;
         voice.start(hebrew, new YugiVoice.Listener() {
             @Override public void onListening(boolean on) { kb.setListening(on); }

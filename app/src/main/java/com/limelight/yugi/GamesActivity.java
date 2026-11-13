@@ -311,6 +311,8 @@ public class GamesActivity extends Activity {
             @Override public int reservedTop() { return chrome.getReservedTop(); }
             @Override public void onKeyboard(boolean shown) { chrome.setChromeVisible(!shown); }
         });
+        // web page fields (Boosteroid login, search) type with the YugiPC keyboard, never the phone's
+        YugiWebKeyboard.attach(this, web, YugiFieldKeyboard.forActivity(this, chat));
     }
 
     private void startEditing() {
