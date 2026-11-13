@@ -30,7 +30,12 @@ import org.robolectric.shadows.ShadowSensor;
 public class YugiBatteryLifecycleTest {
 
     @After
-    public void tearDown() { YugiSessions.offline = false; }
+    public void tearDown() {
+        // let every spring finish: androidx's AnimationHandler is static, and a spring left mid-flight
+        // would keep the next test's springs from ever getting a frame
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(5));
+        YugiSessions.offline = false;
+    }
 
     private static YugiChat newChat(Activity a) {
         return new YugiChat(a, new YugiChat.Host() {
@@ -126,6 +131,8 @@ public class YugiBatteryLifecycleTest {
         assertFalse("gyroscope still on while the screen is paused", pad.isGyroListening());
         pad.setHostPaused(false);
         assertTrue(pad.isGyroListening());
+        root.removeView(pad);
+        assertFalse(pad.isGyroListening());
     }
 
     private static <T extends View> T find(View v, Class<T> type) {
