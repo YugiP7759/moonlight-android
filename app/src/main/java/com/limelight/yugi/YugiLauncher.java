@@ -62,6 +62,9 @@ public class YugiLauncher extends Activity {
     private Runnable pendingAutoRetry;
     private android.widget.ImageView frozen;
     private boolean resizeLaunch;
+    // Last successful connection, reused to re-stream fast after rotate/fold
+    private static ComputerDetails cachedDetails;
+    private static NvApp cachedApp;
     private boolean askingPermissions;
     private long gameStartedAt;
     private int quickFailures;
@@ -271,6 +274,20 @@ public class YugiLauncher extends Activity {
             addr = new ComputerDetails.AddressTuple(YugiConfig.host, YugiConfig.HTTP_PORT);
         }
 
+        // Fast path for rotate/fold: already paired and we know the app, so skip serverinfo/applist.
+        if (resizeLaunch && cachedDetails != null && cachedApp != null && cert != null) {
+            long t0 = System.currentTimeMillis();
+            try {
+                NvHTTP fast = new NvHTTP(addr, cachedDetails.httpsPort, uniqueId, cert, PlatformBinding.getCryptoProvider(this));
+                try { fast.quitApp(); } catch (Exception e) { LimeLog.warning("YugiPC: quit failed: " + e); }
+                LimeLog.info("YugiPC: resize quit took " + (System.currentTimeMillis() - t0) + " ms");
+                startStream(size, cachedDetails, cachedApp, uniqueId, cert);
+                return;
+            } catch (Exception e) {
+                LimeLog.warning("YugiPC: fast re-stream failed, full connect: " + e);
+            }
+        }
+
         // 1. Reachability
         String serverInfo;
         NvHTTP http;
@@ -327,9 +344,22 @@ public class YugiLauncher extends Activity {
             }
 
             // 5. Start streaming
-            applyStreamPrefs(size);
-            sp.edit().putInt(KEY_LAST_W, size.width).putInt(KEY_LAST_H, size.height).putInt(KEY_LAST_FPS, size.fps).apply();
-            final Intent intent = buildGameIntent(details, desktop, uniqueId, cert);
+            cachedDetails = details;
+            cachedApp = desktop;
+            startStream(size, details, desktop, uniqueId, cert);
+        } catch (Exception e) {
+            LimeLog.warning("YugiPC: connect failed: " + e);
+            showError("החיבור נכשל. נסה שוב");
+        }
+    }
+
+    private void startStream(StreamSize size, ComputerDetails details, NvApp desktop, String uniqueId,
+                             X509Certificate cert) throws Exception {
+        applyStreamPrefs(size);
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt(KEY_LAST_W, size.width)
+                .putInt(KEY_LAST_H, size.height).putInt(KEY_LAST_FPS, size.fps).apply();
+        final Intent intent = buildGameIntent(details, desktop, uniqueId, cert);
+        {
             ui.post(() -> {
                 working = false;
                 launchedGame = true;
@@ -346,9 +376,6 @@ public class YugiLauncher extends Activity {
                 // The Game activity shows its own copy of the frozen frame; drop ours once it is covered.
                 ui.postDelayed(this::removeFrozen, 600);
             });
-        } catch (Exception e) {
-            LimeLog.warning("YugiPC: connect failed: " + e);
-            showError("החיבור נכשל. נסה שוב");
         }
     }
 
@@ -451,7 +478,7 @@ public class YugiLauncher extends Activity {
                 .putInt("seekbar_bitrate_kbps", s.fps > 60 ? YugiConfig.BITRATE_120_KBPS : YugiConfig.BITRATE_60_KBPS)
                 .putString("mouse_mode_list", YugiConfig.MOUSE_MODE)
                 .putBoolean("checkbox_multi_touch_gestures", false)
-                .putBoolean("checkbox_enable_commit_text", true) // IME text (incl. Hebrew) as UTF-8
+                .putBoolean("checkbox_enable_commit_text", false) // no phone keyboard
                 .putBoolean("checkbox_disable_warnings", true)
                 .putBoolean("checkbox_enable_floating_button", false)
                 .apply();

@@ -376,7 +376,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             prefConfig.enableMultiTouchScreen = true;  // native touch passthrough (tablet-like)
             prefConfig.touchscreenTrackpad = false;
             prefConfig.enableMultiTouchGestures = false; // let the host see every finger
-            prefConfig.enableCommitText = true;          // phone keyboard text (incl. Hebrew) sent as UTF-8
+            prefConfig.enableCommitText = false;         // no phone keyboard: the PC shows its own on-screen keyboard
             prefConfig.enableFloatingButton = false;
             prefConfig.bitrate = prefConfig.fps > 60
                     ? com.limelight.yugi.YugiConfig.BITRATE_120_KBPS : com.limelight.yugi.YugiConfig.BITRATE_60_KBPS;
@@ -402,6 +402,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
         // Change volume button behavior
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
+        if (getIntent().getBooleanExtra(EXTRA_YUGI, false)) {
+            // YugiPC: the Android soft keyboard never shows during the stream (physical keyboards still work)
+            getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
+        }
 
         // Inflate the content
         setContentView(R.layout.activity_game);
@@ -500,7 +504,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             if (com.limelight.yugi.YugiMedia.isAvailable()) {
                 com.limelight.yugi.YugiOverlay.attach(this);
             }
-            com.limelight.yugi.YugiOverlay.attachKeyboardButton(this, this::toggleKeyboard);
             com.limelight.yugi.YugiFps.reset(() -> runOnUiThread(this::yugiRestart));
 
             // Fold/unfold or rotation: the window changes size (sometimes without a usable
@@ -2476,6 +2479,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     public void toggleKeyboard() {
+        if (yugi) {
+            return; // YugiPC: never open the phone keyboard
+        }
         if (isOnExternalDisplay()) {
             ExternalDisplayControlActivity.toggleKeyboard();
         } else {
@@ -3541,6 +3547,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         if (yugiRestarting) return;
         yugiRestarting = true;
         displayedFailureDialog = true; // suppress any termination dialog
+        com.limelight.yugi.YugiTransition.resizeStartedAt = android.os.SystemClock.uptimeMillis();
         int newRotation = getWindowManager().getDefaultDisplay().getRotation();
         com.limelight.yugi.YugiTransition.rotationDelta = ((newRotation - yugiRotation + 4) % 4);
         // Never show the old stream stretched to the new shape: letterbox it right away.
@@ -3849,6 +3856,11 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 updatePipAutoEnter();
 
                 if (yugi) {
+                    long t = com.limelight.yugi.YugiTransition.resizeStartedAt;
+                    if (t > 0) {
+                        LimeLog.info("YugiPC: resize to stream start took " + (android.os.SystemClock.uptimeMillis() - t) + " ms");
+                        com.limelight.yugi.YugiTransition.resizeStartedAt = 0;
+                    }
                     com.limelight.yugi.YugiTransition.fadeOut(yugiFrozen);
                     yugiFrozen = null;
                     com.limelight.yugi.YugiMedia.start(Game.this);

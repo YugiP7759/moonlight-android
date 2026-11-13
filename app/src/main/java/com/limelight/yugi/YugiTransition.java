@@ -20,9 +20,9 @@ import android.widget.ImageView;
  * reconnecting at the new size in the background, then crossfade to the new stream.
  */
 public final class YugiTransition {
-    public static final long BLUR_IN_MS = 280;
-    public static final long FADE_OUT_MS = 260;
-    public static final long FADE_DELAY_AFTER_START_MS = 150;
+    public static final long BLUR_IN_MS = 200;
+    public static final long FADE_OUT_MS = 200;
+    public static final long FADE_DELAY_AFTER_START_MS = 80;
     public static final float BLUR_RADIUS = 28f;
 
     /** Last frame of the previous stream, shown while the new one connects. */
@@ -31,6 +31,8 @@ public final class YugiTransition {
     public static volatile boolean pendingResize;
     /** Display rotation change (in 90° steps) between the old and new stream, for the turn animation. */
     public static volatile int rotationDelta;
+    /** When the current resize started (uptime ms), for timing logs. */
+    public static volatile long resizeStartedAt;
 
     private YugiTransition() {}
 
