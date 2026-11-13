@@ -371,6 +371,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             prefConfig.videoScaleMode = PreferenceConfiguration.ScaleMode.STRETCH;
             prefConfig.enableMicrophone = false; // mic/camera go through the WHIP side channel
             prefConfig.disableWarnings = true;     // no "slow connection" style messages
+            prefConfig.resolutionScaleFactor = 100;
+            prefConfig.renderMode = 0;             // plain 2D SurfaceView
             prefConfig.enableMultiTouchScreen = false; // direct touch-as-mouse (mode 1)
             prefConfig.touchscreenTrackpad = false;
             prefConfig.enableFloatingButton = false;
@@ -931,7 +933,12 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             // Niente getIdentifier: troviamo la prima SurfaceView nel layout
             SurfaceView streamSurfaceView = findFirstSurfaceViewFrom(root);
 
-            if (streamSurfaceView != null) {
+            if (streamSurfaceView != null && yugi) {
+                // YugiPC: keep the surface at the view's (full-screen) size; the decoder scales the
+                // stream to fit it (bilinear). The stream already has the screen's aspect ratio.
+                LimeLog.info("YugiPC: surface view " + streamSurfaceView.getWidth() + "x" + streamSurfaceView.getHeight()
+                        + ", stream " + displayWidth + "x" + displayHeight);
+            } else if (streamSurfaceView != null) {
                 // Avoid resizes/glitches that break the compositor
                 int vw = (prefConfig != null && prefConfig.width > 0) ? prefConfig.width : displayWidth;
                 int vh = (prefConfig != null && prefConfig.height > 0) ? prefConfig.height : displayHeight;
@@ -1514,7 +1521,13 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             LimeLog.info("Current display mode: "+bestMode.getPhysicalWidth()+"x"+
                     bestMode.getPhysicalHeight()+"x"+bestMode.getRefreshRate());
 
+            final Display.Mode yugiCurrentMode = currentDisplay.getMode();
             for (Display.Mode candidate : currentDisplay.getSupportedModes()) {
+                if (yugi && (candidate.getPhysicalWidth() != yugiCurrentMode.getPhysicalWidth()
+                        || candidate.getPhysicalHeight() != yugiCurrentMode.getPhysicalHeight())) {
+                    // YugiPC: never switch the panel resolution, only the refresh rate
+                    continue;
+                }
                 boolean refreshRateReduced = candidate.getRefreshRate() < bestMode.getRefreshRate();
                 boolean resolutionReduced = candidate.getPhysicalWidth() < bestMode.getPhysicalWidth() ||
                         candidate.getPhysicalHeight() < bestMode.getPhysicalHeight();
