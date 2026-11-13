@@ -135,6 +135,19 @@
       }
     }
     css().textContent = rules;
+    // Ancestors with transform/filter/contain would trap position:fixed inside the site's player box
+    if (isStreamPage()) {
+      var vv = document.getElementById('remotevideo');
+      for (var el = vv && vv.parentElement; el && el !== document.documentElement; el = el.parentElement) {
+        var st = el.style;
+        st.setProperty('transform', 'none', 'important');
+        st.setProperty('filter', 'none', 'important');
+        st.setProperty('perspective', 'none', 'important');
+        st.setProperty('contain', 'none', 'important');
+        st.setProperty('will-change', 'auto', 'important');
+        st.setProperty('backdrop-filter', 'none', 'important');
+      }
+    }
     // The player may live in a shadow root or a same-origin iframe
     try {
       var frames = document.querySelectorAll('iframe');

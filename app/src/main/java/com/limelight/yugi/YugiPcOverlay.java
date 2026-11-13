@@ -24,7 +24,7 @@ public final class YugiPcOverlay {
     public static YugiPcOverlay attach(Activity a, SurfaceView surface, Runnable openGames) {
         YugiPcOverlay o = new YugiPcOverlay();
         List<YugiChrome.Button> buttons = new ArrayList<>();
-        if (YugiChat.isEnabled()) {
+        if (YugiChat.isChatEnabled()) {
             buttons.add(new YugiChrome.Button(R.drawable.yugi_ic_yugi, "יוגי", () -> { if (o.chat != null) o.chat.toggle(); }));
         }
         if (YugiMedia.isAvailable()) {

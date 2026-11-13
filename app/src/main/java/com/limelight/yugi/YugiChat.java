@@ -120,7 +120,7 @@ public class YugiChat extends FrameLayout {
             .writeTimeout(60, TimeUnit.SECONDS)
             .build();
 
-    public static boolean isEnabled() {
+    public static boolean isChatEnabled() {
         return !BuildConfig.YUGI_CHAT_TOKEN.isEmpty();
     }
 
@@ -309,7 +309,7 @@ public class YugiChat extends FrameLayout {
 
     /** Adds the (hidden) panel over an activity. */
     public static YugiChat attach(Activity a, Host host) {
-        if (!isEnabled()) return null;
+        if (!isChatEnabled()) return null;
         YugiChat c = new YugiChat(a, host);
         a.addContentView(c, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         current = c;
