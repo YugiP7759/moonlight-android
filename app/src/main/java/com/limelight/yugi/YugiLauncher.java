@@ -429,6 +429,7 @@ public class YugiLauncher extends Activity {
         float scale = (wide ? YugiConfig.COVER_SCALE : YugiConfig.INNER_SCALE) * YugiConfig.RES_SCALE;
         int fps = wide ? YugiConfig.COVER_FPS : YugiConfig.INNER_FPS;
         if (YugiFps.fallback || maxRefreshRate() < fps - 1) fps = YugiConfig.FPS_FALLBACK;
+        fps = Math.min(fps, YugiConfig.MAX_FPS);
         StreamSize s = new StreamSize();
         s.width = YugiConfig.align(w * scale);
         s.height = YugiConfig.align(h * scale);

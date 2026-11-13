@@ -98,6 +98,9 @@ public final class YugiKeyboardHost implements YugiEvents.Listener, YugiKeyboard
 
     public void start() { events.start(); }
 
+    /** The server event stream (shared with the media redirect). */
+    public YugiEvents events() { return events; }
+
     public void stop() {
         events.stop();
         kb.removeCallbacks(autoHide);

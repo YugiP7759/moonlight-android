@@ -198,6 +198,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private com.limelight.yugi.YugiKeyboardHost yugiKeys;
     private FrameLayout yugiDesktop;
     private com.limelight.yugi.YugiPcOverlay yugiOverlay;
+    private com.limelight.yugi.YugiPlayer yugiPlayer;
+    /** Window changed shape while the local player was open: re-stream once it closes. */
+    private boolean yugiRestartAfterPlayer;
     private com.limelight.yugi.YugiBrandView yugiBrand;
     private boolean connecting = false;
     public boolean connected = false;
@@ -385,6 +388,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             prefConfig.enableCommitText = false;         // no phone keyboard: the PC shows its own on-screen keyboard
             prefConfig.enableFloatingButton = false;
             prefConfig.showOverlayZoomToggleButton = false; // the YugiPC toolbar is the only floating control
+            // no GPU on the server: never more than 60 FPS (120 in software x264 costs more than it gives)
+            if (prefConfig.fps > com.limelight.yugi.YugiConfig.MAX_FPS) prefConfig.fps = com.limelight.yugi.YugiConfig.MAX_FPS;
             prefConfig.bitrate = prefConfig.fps > 60
                     ? com.limelight.yugi.YugiConfig.BITRATE_120_KBPS : com.limelight.yugi.YugiConfig.BITRATE_60_KBPS;
         }
@@ -533,11 +538,11 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             // onConfigurationChanged). Watch the real view size and re-stream on any aspect change.
             // If the system re-created this activity on a new screen with the old stream size, re-stream now.
             getWindow().getDecorView().post(() -> {
-                if (!yugiRestarting && yugiSizeChanged()) yugiRestart();
+                if (!yugiRestarting && yugiSizeChanged()) yugiRestartUnlessPlaying();
             });
             getWindow().getDecorView().addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
                 if ((r - l) != (or - ol) || (b - t) != (ob - ot)) {
-                    if (yugiSizeChanged()) yugiRestart();
+                    if (yugiSizeChanged()) yugiRestartUnlessPlaying();
                 }
             });
         }
@@ -1282,7 +1287,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         super.onConfigurationChanged(newConfig);
 
         if (yugi && yugiSizeChanged()) {
-            yugiRestart();
+            yugiRestartUnlessPlaying();
             return;
         }
 
@@ -1805,6 +1810,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     @Override
     protected void onDestroy() {
         if (yugiChat != null) yugiChat.release();
+        if (yugiPlayer != null) yugiPlayer.release();
         if (yugiKeys != null) yugiKeys.stop();
         stopMicrophoneCapture();
         super.onDestroy();
@@ -1871,6 +1877,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     @Override
     protected void onStop() {
         super.onStop();
+        if (yugiPlayer != null) yugiPlayer.release(); // the position goes back to the desktop
         if (yugiKeys != null) yugiKeys.stop(); // no event stream in the background
 
         SpinnerDialog.closeDialogs(this);
@@ -2135,6 +2142,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_BACK && yugiPlayer != null && yugiPlayer.isOpen()) {
+            if (event.getRepeatCount() == 0) yugiPlayer.close();
+            return true;
+        }
         return handleKeyDown(event) || super.onKeyDown(keyCode, event);
     }
 
@@ -2226,6 +2237,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_BACK && yugiPlayer != null && yugiPlayer.isOpen()) return true;
         return handleKeyUp(event) || super.onKeyUp(keyCode, event);
     }
 
@@ -3591,7 +3603,39 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             yugiOverlay.setKeyboardAction(yugiKeys::toggle);
             yugiKeys.setStateListener(yugiOverlay::setKeyboardActive);
         }
+        yugiAttachPlayer();
         yugiKeys.start();
+    }
+
+    /** Hybrid stage 2: videos that start on the desktop play here, natively (YugiPlayer). */
+    private void yugiAttachPlayer() {
+        yugiPlayer = com.limelight.yugi.YugiPlayer.attach(this, new com.limelight.yugi.YugiPlayer.Host() {
+            @Override public void capture(com.limelight.yugi.YugiChat.BitmapCallback cb) {
+                com.limelight.yugi.YugiPcOverlay.captureFrame(streamContainer.getSurfaceView(), cb);
+            }
+            @Override public View streamView() { return streamContainer.getSurfaceView(); }
+            @Override public void onPlayerClosed() {
+                if (yugiRestartAfterPlayer) {
+                    yugiRestartAfterPlayer = false;
+                    if (yugiSizeChanged()) yugiRestart();
+                }
+            }
+        });
+        yugiKeys.events().setMediaListener(r -> {
+            if (!yugiRestarting && yugiPlayer != null) yugiPlayer.open(r);
+        });
+    }
+
+    /**
+     * Rotation / fold while the local player is open: the player simply follows the new window and the
+     * stream (hidden under it) re-streams at the new size only after the player closes.
+     */
+    private void yugiRestartUnlessPlaying() {
+        if (yugiPlayer != null && yugiPlayer.isOpen()) {
+            yugiRestartAfterPlayer = true;
+            return;
+        }
+        yugiRestart();
     }
 
     /** YugiPC: true if the window's aspect ratio no longer matches the stream (rotation / fold / unfold). */
@@ -4257,6 +4301,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     public void onBackPressed() {
+        if (yugiPlayer != null && yugiPlayer.isOpen()) {
+            yugiPlayer.close();
+            return;
+        }
         if(prefConfig.enableBackMenu){
             showGameMenu(null);
             return;

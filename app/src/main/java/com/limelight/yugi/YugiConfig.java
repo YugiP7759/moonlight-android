@@ -15,7 +15,12 @@ public final class YugiConfig {
     public static final String APP_NAME = "Desktop";
 
     /** Requested frame rate, and the stable minimum. */
-    public static final int FPS_PREFERRED = 120;
+    public static final int FPS_PREFERRED = 60;
+    /**
+     * Hard cap. The server has no GPU: 120 FPS in software x264 (e.g. 1440x648@120) costs far more CPU
+     * than it gives, so every profile is clamped here.
+     */
+    public static final int MAX_FPS = 60;
     public static final int FPS_FALLBACK = 60;
 
     /**
@@ -28,7 +33,7 @@ public final class YugiConfig {
      */
     public static final float WIDE_ASPECT = 1.6f;
     public static final float COVER_SCALE = 0.66f;
-    public static final int COVER_FPS = 120;
+    public static final int COVER_FPS = 60; // was 120: capped by MAX_FPS
     public static final float INNER_SCALE = 0.55f;
     public static final int INNER_FPS = 60;
 

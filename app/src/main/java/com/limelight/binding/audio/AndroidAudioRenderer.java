@@ -185,8 +185,17 @@ public class AndroidAudioRenderer implements AudioRenderer {
         return 0;
     }
 
+    /** YugiPC: stream volume (ducked while the local video player is open). */
+    public static volatile float yugiVolume = 1f;
+    private float yugiApplied = 1f;
+
     @Override
     public void playDecodedAudio(short[] audioData) {
+        float v = yugiVolume;
+        if (v != yugiApplied && track != null) {
+            track.setVolume(v);
+            yugiApplied = v;
+        }
         // Only queue up to 40 ms of pending audio data in addition to what AudioTrack is buffering for us.
         if (MoonBridge.getPendingAudioDuration() < 40) {
             // This will block until the write is completed. That can cause a backlog

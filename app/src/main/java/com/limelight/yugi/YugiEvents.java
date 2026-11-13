@@ -47,6 +47,16 @@ public final class YugiEvents {
         void onCaret(Caret c, boolean replay);
     }
 
+    /** A video that started on the desktop and should play here (event "media", never replayed). */
+    public interface MediaListener {
+        /** UI thread. */
+        void onMedia(YugiPlayer.Request r);
+    }
+
+    private volatile MediaListener mediaListener;
+
+    public void setMediaListener(MediaListener l) { mediaListener = l; }
+
     private static final long READ_TIMEOUT_S = 50;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -80,7 +90,34 @@ public final class YugiEvents {
     }
 
     private String url() {
-        return "http://" + YugiConfig.host + ":" + YugiConfig.WHIP_PORT + "/events";
+        return base() + "/events";
+    }
+
+    static String base() {
+        return "http://" + YugiConfig.host + ":" + YugiConfig.WHIP_PORT;
+    }
+
+    private static final OkHttpClient POSTER = new OkHttpClient.Builder()
+            .connectTimeout(3, TimeUnit.SECONDS).readTimeout(3, TimeUnit.SECONDS).build();
+
+    /** POST /media/state (fire and forget, off the UI thread): opened | playing | paused | closed | error. */
+    public static void postMediaState(String id, String state, double t, String reason) {
+        try {
+            JSONObject o = new JSONObject().put("id", id).put("state", state)
+                    .put("t", Double.isNaN(t) || t < 0 ? 0 : t);
+            if (reason != null) o.put("reason", reason);
+            okhttp3.RequestBody body = okhttp3.RequestBody.create(o.toString(),
+                    okhttp3.MediaType.get("application/json"));
+            POSTER.newCall(new Request.Builder().url(base() + "/media/state").post(body).build())
+                    .enqueue(new okhttp3.Callback() {
+                        @Override public void onFailure(Call call, java.io.IOException e) {
+                            LimeLog.info("YugiEvents: media state " + state + ": " + e.getMessage());
+                        }
+                        @Override public void onResponse(Call call, Response res) { res.close(); }
+                    });
+        } catch (Exception e) {
+            LimeLog.warning("YugiEvents: media state " + e);
+        }
     }
 
     private void loop() {
@@ -128,6 +165,17 @@ public final class YugiEvents {
     }
 
     private void dispatch(String event, String data, boolean replay) {
+        if ("media".equals(event)) {
+            MediaListener ml = mediaListener;
+            if (ml == null || replay) return;
+            try {
+                YugiPlayer.Request r = YugiPlayer.Request.parse(new JSONObject(data));
+                if (r != null) ui.post(() -> { if (running) ml.onMedia(r); });
+            } catch (Exception e) {
+                LimeLog.warning("YugiEvents: bad media " + e);
+            }
+            return;
+        }
         if (!"caret".equals(event)) return;
         try {
             Caret c = new Caret(new JSONObject(data));

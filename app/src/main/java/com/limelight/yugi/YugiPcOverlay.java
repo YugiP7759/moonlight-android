@@ -73,6 +73,8 @@ public final class YugiPcOverlay {
     }
 
     /** Current desktop frame straight from the video surface (without overlays). */
+    public static void captureFrame(SurfaceView sv, YugiChat.BitmapCallback cb) { capture(sv, cb); }
+
     static void capture(SurfaceView sv, YugiChat.BitmapCallback cb) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N || sv == null || sv.getWidth() <= 0
                 || sv.getHolder().getSurface() == null || !sv.getHolder().getSurface().isValid()) {
