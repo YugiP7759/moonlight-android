@@ -399,18 +399,28 @@ public class YugiChat extends FrameLayout {
     /** Keyboard (IME) and navigation-bar insets in px. */
     public void setInsets(int ime, int nav) {
         if (ime != imeInset || nav != navInset) {
-            boolean wasShown = imeInset > 0;
+            boolean wasTight = tight();
             imeInset = ime;
-            if ((ime > 0) != compactAttachments) {
-                // Keyboard up: attachments shrink to a 40dp strip so the messages keep their room
-                compactAttachments = ime > 0;
-                renderPending();
-            }
-            if (host != null && (ime > 0) != wasShown) host.onKeyboard(ime > 0 && open);
+            applyTight(wasTight);
             navInset = nav;
             requestLayout();
             if (open) scrollToEnd();
         }
+    }
+
+    /** Short screen (cover screen in landscape) or keyboard up: use the whole height, compact attachments. */
+    private boolean tight() {
+        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        return imeInset > 0 || dm.heightPixels / dm.density < 500;
+    }
+
+    private void applyTight(boolean wasTight) {
+        boolean t = tight();
+        if (t != compactAttachments) {
+            compactAttachments = t;
+            renderPending();
+        }
+        if (host != null && open && t != wasTight) host.onKeyboard(t);
     }
 
     @Override
@@ -438,7 +448,7 @@ public class YugiChat extends FrameLayout {
     Rect cardRect(int w, int h) {
         int m = dp(12);
         // With the keyboard up the toolbar hides, so the card can use the whole height above it
-        int top = imeInset > 0 ? m : Math.max(m, host != null ? host.reservedTop() : m);
+        int top = tight() ? m : Math.max(m, host != null ? host.reservedTop() : m);
         int bottom = h - Math.max(m, Math.max(imeInset, navInset) + m);
         int width = w >= dp(600) ? Math.min(dp(420), (int) (w * 0.46f)) : w - 2 * m;
         boolean rtl = getLayoutDirection() == LAYOUT_DIRECTION_RTL;
@@ -470,6 +480,8 @@ public class YugiChat extends FrameLayout {
             card.setTranslationX(dp(24) * (getLayoutDirection() == LAYOUT_DIRECTION_RTL ? -1 : 1));
             card.animate().alpha(1f).translationX(0).setDuration(160).start();
             if (!historyLoaded) loadHistory();
+            if (host != null && tight()) host.onKeyboard(true); // the toolbar makes room
+            if (compactAttachments != tight()) { compactAttachments = tight(); renderPending(); }
             scrollToEnd();
             requestApplyInsets();
         } else {
@@ -559,7 +571,7 @@ public class YugiChat extends FrameLayout {
             iv.setClipToOutline(true);
             iv.setBackground(YugiTheme.rounded(c, YugiTheme.SURFACE, YugiTheme.RADIUS_S - 1));
             frame.addView(iv, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            int w = compact ? 32 : removable ? 56 : 160, h = compact ? 32 : removable ? 56 : 100;
+            int w = compact ? 32 : removable ? 56 : 120, h = compact ? 32 : removable ? 56 : 72;
             content = frame;
             f.addView(frame, new LayoutParams(dp(w), dp(h)));
         } else {
