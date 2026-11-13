@@ -152,6 +152,8 @@ public class YugiChat extends FrameLayout {
     private final LinearLayout attachRow;
     private final HorizontalScrollView attachScroll;
     private final LinearLayout inputBox;
+    /** The server's Yugi sessions, shown in place of this conversation (same card). */
+    private final YugiSessions sessions;
     // Attachments waiting to be sent (shared: the file picker may outlive the hosting screen)
     private static final List<Attachment> pending = new ArrayList<>();
     /** Set by the file picker: reopen the panel on the next screen that attaches it. */
@@ -216,6 +218,9 @@ public class YugiChat extends FrameLayout {
         stopBtn.setOnClickListener(v -> stop());
         stopBtn.setVisibility(GONE);
         head.addView(stopBtn, sq(48));
+        ImageButton sessionsBtn = YugiTheme.iconButton(ctx, R.drawable.yugi_ic_sessions, "סשנים");
+        sessionsBtn.setOnClickListener(v -> showSessions(true));
+        head.addView(sessionsBtn, sq(48));
         ImageButton newChat = YugiTheme.iconButton(ctx, R.drawable.yugi_ic_add, "שיחה חדשה");
         newChat.setOnClickListener(v -> reset());
         head.addView(newChat, sq(48));
@@ -306,6 +311,15 @@ public class YugiChat extends FrameLayout {
         card.addView(inputBox);
         updateSendButton();
 
+        // ---- sessions panel (on top of everything in the card while shown) ----
+        sessions = new YugiSessions(ctx, new YugiSessions.Host() {
+            @Override public void onBack() { showSessions(false); }
+            @Override public void onClose() { setOpen(false); }
+        });
+        sessions.setVisibility(GONE);
+        card.sessions = sessions;
+        card.addView(sessions);
+
         // Keep the card above the keyboard and system bars
         setOnApplyWindowInsetsListener((v, insets) -> {
             int ime = 0, nav = 0;
@@ -328,7 +342,9 @@ public class YugiChat extends FrameLayout {
      * With little room (keyboard open on the cover screen) the header is dropped.
      */
     static final class ChatCard extends ViewGroup {
-        View header, hair, scroll, attach, input;
+        View header, hair, scroll, attach, input, sessions;
+
+        private boolean sessionsShown() { return sessions != null && sessions.getVisibility() != GONE; }
 
         ChatCard(Context c) { super(c); }
 
@@ -357,6 +373,16 @@ public class YugiChat extends FrameLayout {
                 avail -= header.getMeasuredHeight() + hair.getMeasuredHeight() + dp(6);
             }
             scroll.measure(exactW, MeasureSpec.makeMeasureSpec(Math.max(0, avail), MeasureSpec.EXACTLY));
+            if (sessionsShown()) {
+                sessions.measure(exactW, MeasureSpec.makeMeasureSpec(Math.max(0, h - getPaddingTop() - getPaddingBottom()), MeasureSpec.EXACTLY));
+            }
+        }
+
+        @Override
+        protected boolean drawChild(android.graphics.Canvas canvas, View child, long drawingTime) {
+            // While the sessions panel is fully in, the chat underneath isn't drawn (or seen through it)
+            if (child != sessions && sessionsShown() && sessions.getAlpha() >= 1f) return false;
+            return super.drawChild(canvas, child, drawingTime);
         }
 
         @Override
@@ -375,6 +401,9 @@ public class YugiChat extends FrameLayout {
             bottom -= input.getMeasuredHeight() + dp(4);
             if (attach.getVisibility() != GONE) {
                 attach.layout(left, bottom - attach.getMeasuredHeight(), right, bottom);
+            }
+            if (sessionsShown()) {
+                sessions.layout(left, getPaddingTop(), right, getPaddingTop() + sessions.getMeasuredHeight());
             }
         }
     }
@@ -479,6 +508,32 @@ public class YugiChat extends FrameLayout {
 
     public boolean isOpen() { return open; }
 
+    /** Swaps the card between this conversation and the sessions list (crossfade with a small rise). */
+    public void showSessions(boolean show) {
+        boolean now = sessions.getVisibility() == VISIBLE;
+        if (show == now) return;
+        if (show) {
+            hideKeyboard();
+            sessions.setVisibility(VISIBLE);
+            sessions.setAlpha(0f);
+            sessions.setTranslationY(dp(12));
+            sessions.animate().alpha(1f).translationY(0).setDuration(180)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator(2f)).withEndAction(card::invalidate).start();
+            sessions.setShown(open);
+        } else {
+            sessions.setShown(false);
+            sessions.setAlpha(0.99f); // draw the chat underneath while fading out
+            sessions.animate().alpha(0f).translationY(dp(8)).setDuration(140)
+                    .withEndAction(() -> { sessions.setVisibility(GONE); sessions.setTranslationY(0); card.requestLayout(); }).start();
+        }
+        card.requestLayout();
+    }
+
+    public boolean isSessionsShown() { return sessions.getVisibility() == VISIBLE; }
+
+    /** For previews/tests: the sessions panel. */
+    YugiSessions sessionsForTest() { return sessions; }
+
     public void toggle() { setOpen(!open); }
 
     public void setOpen(boolean o) {
@@ -490,12 +545,14 @@ public class YugiChat extends FrameLayout {
             card.setTranslationX(dp(24) * (getLayoutDirection() == LAYOUT_DIRECTION_RTL ? -1 : 1));
             card.animate().alpha(1f).translationX(0).setDuration(160).start();
             if (!historyLoaded) loadHistory();
+            if (sessions.getVisibility() == VISIBLE) sessions.setShown(true);
             if (host != null && tight()) host.onKeyboard(true); // the toolbar makes room
             if (compactAttachments != tight()) { compactAttachments = tight(); renderPending(); }
             scrollToEnd();
             requestApplyInsets();
         } else {
             hideKeyboard();
+            sessions.setShown(false);
             if (host != null) host.onKeyboard(false);
             stopListening();
             if (tts != null) tts.stop();

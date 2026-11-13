@@ -180,6 +180,49 @@ public class YugiUiScreenshotTest {
         checkChat("chat+keyboard", chat, pcChrome, w, h, ime, problems);
         drawKeyboard(pc, w, h, ime, name + "-f-chat-keyboard");
 
+        // ---- sessions: list of the server's Yugi sessions, then one session's live chat (+ keyboard)
+        chat.setInsets(0, 0);
+        YugiSessions.offline = true;
+        chat.showSessions(true);
+        YugiSessions ss = chat.sessionsForTest();
+        ss.animate().cancel();
+        ss.setAlpha(1f);
+        ss.setTranslationY(0);
+        ss.renderList(new org.json.JSONArray(SESSIONS_JSON));
+        idle();
+        layout(pc, w, h);
+        layout(pc, w, h);
+        checkSessionsList(chat, ss, pcChrome, w, h, problems);
+        save(pc, name + "-h1-sessions");
+
+        org.json.JSONArray list = new org.json.JSONArray(SESSIONS_JSON);
+        ss.openDetail(list.getJSONObject(0));
+        ss.onEvent("hello", new org.json.JSONObject("{\"session\":" + list.getJSONObject(0) + ",\"items\":" + ITEMS_JSON + "}"));
+        ss.settleForTest();
+        idle();
+        layout(pc, w, h);
+        layout(pc, w, h);
+        checkSessionDetail("session", chat, ss, w, h, 0, problems);
+        save(pc, name + "-h2-session");
+
+        chat.setInsets(ime, 0);
+        layout(pc, w, h);
+        layout(pc, w, h);
+        checkSessionDetail("session+keyboard", chat, ss, w, h, ime, problems);
+        drawKeyboard(pc, w, h, ime, name + "-h3-session-keyboard");
+        chat.setInsets(0, 0);
+
+        ss.openDetail(list.getJSONObject(3)); // opened from the Claude app: read only
+        ss.onEvent("hello", new org.json.JSONObject("{\"session\":" + list.getJSONObject(3) + ",\"items\":" + ITEMS_JSON + "}"));
+        ss.settleForTest();
+        idle();
+        layout(pc, w, h);
+        layout(pc, w, h);
+        checkSessionDetail("session read-only", chat, ss, w, h, 0, problems);
+        save(pc, name + "-h4-session-readonly");
+        chat.showSessions(false);
+        ss.animate().cancel();
+
         // ---- launch sequence: splash -> branded connecting (with and without last frame) -> error
         android.graphics.drawable.Drawable splash = a.getDrawable(R.drawable.yugipc_launch_bg);
         Bitmap sb = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
@@ -223,6 +266,53 @@ public class YugiUiScreenshotTest {
         if (input.height() < 40) problems.add(what + ": input too small " + input);
         checkNoOverlap(what, List.of(card), "chrome", chrome.visibleRects(), problems);
     }
+
+    private void checkSessionsList(YugiChat chat, YugiSessions ss, YugiChrome chrome, int w, int h, List<String> problems) {
+        Rect card = chat.cardRect();
+        int ox = card.left + ss.getLeft(), oy = card.top + ss.getTop();
+        List<Rect> cards = new ArrayList<>();
+        for (Rect r : ss.cardRects()) { r.offset(ox, oy); cards.add(r); }
+        if (cards.isEmpty()) problems.add("sessions: no cards rendered");
+        Rect panel = new Rect(ox, oy, ox + ss.getWidth(), oy + ss.getHeight());
+        checkInside("sessions panel", List.of(panel), w, h, problems);
+        for (Rect r : cards) {
+            if (r.height() < dp(ss.getContext(), 48)) problems.add("sessions: card shorter than 48dp " + r.toShortString());
+            if (r.left < panel.left || r.right > panel.right) problems.add("sessions: card leaves the panel " + r.toShortString());
+        }
+        checkNoOverlap("sessions cards", cards, "sessions cards", cards, problems);
+        checkNoOverlap("sessions", List.of(card), "chrome", chrome.visibleRects(), problems);
+    }
+
+    private void checkSessionDetail(String what, YugiChat chat, YugiSessions ss, int w, int h, int ime, List<String> problems) {
+        Rect card = chat.cardRect();
+        Rect bottom = ss.bottomRect();
+        bottom.offset(card.left + ss.getLeft(), card.top + ss.getTop());
+        checkInside(what + " card", List.of(card), w, h - ime, problems);
+        checkInside(what + " input", List.of(bottom), w, h - ime, problems);
+        if (bottom.height() < 40) problems.add(what + ": input too small " + bottom);
+        if (bottom.bottom > card.bottom) problems.add(what + ": input below the card " + bottom.toShortString());
+        int visible = ss.visibleMessageCount();
+        if (visible < (ime > 0 ? 1 : 2)) problems.add(what + ": only " + visible + " message(s) fully visible");
+    }
+
+    private static final String SESSIONS_JSON = "["
+            + "{\"id\":\"1348\",\"name\":\"Personal\",\"areaLabel\":\"אישי\",\"state\":\"working\",\"canSend\":true,\"updatedAt\":" + (System.currentTimeMillis() - 20000)
+            + ",\"lastMessage\":{\"role\":\"assistant\",\"text\":\"יצא סוכן לתקן. התפריט ייגרר גם כשהוא פתוח וגם כשהוא סגור, וייצמד לקצה המסך. אשלח קישור כשיהיה מוכן.\"},"
+            + "\"agents\":[{\"id\":\"a1\",\"description\":\"מסך סשנים ב-YugiPC\"},{\"id\":\"a2\",\"description\":\"תפריט צף נגרר\"}]},"
+            + "{\"id\":\"1354\",\"name\":\"Mamila\",\"areaLabel\":\"ממילא\",\"state\":\"waiting\",\"canSend\":true,\"updatedAt\":" + (System.currentTimeMillis() - 3 * 3600000)
+            + ",\"lastMessage\":{\"role\":\"user\",\"text\":\"תכין סיכום של הפגישה עם הזוג מאשדוד\"},\"agents\":[]},"
+            + "{\"id\":\"1362\",\"name\":\"NextPress\",\"areaLabel\":\"נקסט פרס\",\"state\":\"needs\",\"canSend\":true,\"updatedAt\":" + (System.currentTimeMillis() - 600000)
+            + ",\"lastMessage\":{\"role\":\"assistant\",\"text\":\"לא צריך APK חדש, מספיק להיכנס לאפליקציה.\"},\"agents\":[]},"
+            + "{\"id\":\"3811174\",\"name\":\"טובה בשמחות\",\"areaLabel\":\"כללי\",\"state\":\"waiting\",\"canSend\":false,\"sendNote\":\"הסשן נפתח מאפליקציית Claude, אז אפשר רק לצפות בו מכאן\",\"updatedAt\":" + (System.currentTimeMillis() - 2 * 86400000L)
+            + ",\"lastMessage\":{\"role\":\"assistant\",\"text\":\"התצוגה מוכנה, ושונה בה רק מה שטובה ביקשה.\"},\"agents\":[]}"
+            + "]";
+
+    private static final String ITEMS_JSON = "["
+            + "{\"id\":\"m1\",\"role\":\"user\",\"text\":\"מה המצב עם התפריט הצף?\"},"
+            + "{\"id\":\"m2\",\"role\":\"assistant\",\"text\":\"סוכן עובד עליו עכשיו. התפריט ייגרר גם כשהוא פתוח, וייצמד לקצה הקרוב בתנועת קפיץ.\"},"
+            + "{\"id\":\"m3\",\"role\":\"user\",\"text\":\"מעולה, ותבדוק שזה עובד גם במסך החיצוני\"},"
+            + "{\"id\":\"m4\",\"role\":\"assistant\",\"text\":\"בודק בשני המסכים, לאורך ולרוחב. אעדכן כשיש APK.\"}"
+            + "]";
 
     private static void checkInside(String what, List<Rect> rects, int w, int h, List<String> problems) {
         for (Rect r : rects) {
