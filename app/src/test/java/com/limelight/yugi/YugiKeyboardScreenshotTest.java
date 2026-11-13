@@ -154,7 +154,60 @@ public class YugiKeyboardScreenshotTest {
         host.settleForTest();
         assertEquals(name + ": no scroll when the field is visible", 0f, desktop.getTranslationY(), 0.5f);
 
+        // hidden by hand while still in the field: a new tap into a field brings it back
+        host.onHideRequested();
+        host.settleForTest();
+        host.caretForTest(true, 900, CARET_H, DESK_W, DESK_H);
+        assertFalse(name + ": stays hidden without a tap", host.isShown());
+        host.noteTouch(500);
+        host.caretForTest(true, 300, CARET_H, DESK_W, DESK_H);
+        assertTrue(name + ": tap into a field shows it again", host.isShown());
+
         assertTrue(String.join("\n", problems), problems.isEmpty());
+        battery(name, w, h);
+    }
+
+    /** First-run battery sheet: RTL text inside the card, buttons inside and apart. */
+    private void battery(String name, int w, int h) throws Exception {
+        Activity a = Robolectric.buildActivity(Activity.class).setup().get();
+        FrameLayout root = new FrameLayout(a);
+        root.addView(new DesktopView(a), match());
+        a.setContentView(root);
+        ViewGroup scrim = (ViewGroup) YugiBattery.ask(a, () -> {}, () -> {});
+        idle();
+        View content = a.findViewById(android.R.id.content);
+        layout(content, w, h);
+        ViewGroup card = (ViewGroup) scrim.getChildAt(0);
+        List<String> problems = new ArrayList<>();
+        android.graphics.Rect cr = new android.graphics.Rect();
+        card.getGlobalVisibleRect(cr);
+        if (cr.left < 0 || cr.right > w || cr.top < 0 || cr.bottom > h) problems.add(name + ": battery card off screen " + cr);
+        List<android.graphics.Rect> texts = new ArrayList<>();
+        collect(card, texts);
+        for (android.graphics.Rect t : texts) {
+            if (!cr.contains(t)) problems.add(name + ": battery text outside the card " + t);
+        }
+        for (int i = 0; i < texts.size(); i++) for (int j = i + 1; j < texts.size(); j++) {
+            if (android.graphics.Rect.intersects(texts.get(i), texts.get(j))) problems.add(name + ": battery texts overlap " + texts.get(i) + " " + texts.get(j));
+        }
+        save(content, "kb-" + name + "-battery");
+        assertTrue(String.join("\n", problems), problems.isEmpty());
+    }
+
+    private static void collect(View v, List<android.graphics.Rect> out) {
+        if (v instanceof android.widget.TextView) {
+            android.widget.TextView t = (android.widget.TextView) v;
+            android.graphics.Rect r = new android.graphics.Rect();
+            t.getGlobalVisibleRect(r);
+            // the text itself must fit its view: no ellipsis, no clipped lines
+            if (t.getLayout() != null && t.getLayout().getHeight() > t.getHeight() - t.getPaddingTop() - t.getPaddingBottom() + 1) {
+                throw new AssertionError("clipped text: " + t.getText());
+            }
+            out.add(r);
+        } else if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) collect(g.getChildAt(i), out);
+        }
     }
 
     // ---------------------------------------------------------------- checks

@@ -50,6 +50,8 @@ public final class YugiKeyboardHost implements YugiEvents.Listener, YugiKeyboard
     private boolean lastEditable;
     private YugiEvents.Caret caret;    // last caret with a rect
     private float lastTouchY = Float.NaN; // stream-local
+    private long lastTouchAt = Long.MIN_VALUE / 4; // uptime ms (none yet)
+    private static final long TAP_TO_FOCUS_MS = 800;
     private final Runnable autoHide = () -> { if (autoShown) hide(); };
 
     public static YugiKeyboardHost attach(Activity a, View desktopWrapper, View streamView, YugiKeyEngine.Sender sender) {
@@ -104,7 +106,10 @@ public final class YugiKeyboardHost implements YugiEvents.Listener, YugiKeyboard
     public boolean isShown() { return wantShown; }
 
     /** Last touch on the stream, in the stream view's own pixels (the fallback caret). */
-    public void noteTouch(float yInStream) { lastTouchY = yInStream; }
+    public void noteTouch(float yInStream) {
+        lastTouchY = yInStream;
+        lastTouchAt = android.os.SystemClock.uptimeMillis();
+    }
 
     /** Desktop offset (px, <= 0) currently applied, for touch mapping outside the stream view. */
     public float desktopOffset() { return desktop.getTranslationY(); }
@@ -163,7 +168,6 @@ public final class YugiKeyboardHost implements YugiEvents.Listener, YugiKeyboard
 
     @Override
     public void onCaret(YugiEvents.Caret c, boolean replay) {
-        boolean wasEditable = lastEditable;
         lastEditable = c.editable;
         if (c.editable && c.hasRect && c.screenH > 0) caret = c;
         if (!c.editable) {
@@ -173,9 +177,11 @@ public final class YugiKeyboardHost implements YugiEvents.Listener, YugiKeyboard
             return;
         }
         kb.removeCallbacks(autoHide);
+        // a tap into a text field brings the keyboard back even after it was hidden by hand (Windows does)
+        if (userHidden && !replay && android.os.SystemClock.uptimeMillis() - lastTouchAt < TAP_TO_FOCUS_MS) userHidden = false;
         if (wantShown) {
             retargetShift();
-        } else if (!replay && !userHidden && (!wasEditable || autoShown)) {
+        } else if (!replay && !userHidden) {
             autoShown = true;
             show();
         }

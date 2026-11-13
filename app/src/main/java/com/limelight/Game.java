@@ -870,9 +870,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 .setBitrate(isMetered ? prefConfig.meteredBitrate: prefConfig.bitrate)
                 .setEnableSops(prefConfig.enableSops)
                 .enableLocalAudioPlayback(prefConfig.playHostAudio)
-                // YugiPC: the stream always crosses Tailscale (MTU 1280). With the embedded tunnel the host is
-                // 127.0.0.1, which auto-detection takes for LAN and keeps 1392, so every video packet would be
-                // fragmented and lost twice as often on shaky Wi-Fi. 1024 fits in one tunnel packet.
+                // YugiPC: the stream always crosses Tailscale (MTU 1280), so the video packet size is pinned to
+                // 1024 (one tunnel packet, no fragmentation) instead of relying on LAN/remote auto-detection.
                 .setMaxPacketSize(yugi ? 1024 : 1392)
                 .setRemoteConfiguration(StreamConfiguration.STREAM_CFG_AUTO) // NvConnection will perform LAN and VPN detection
                 .setSupportedVideoFormats(supportedVideoFormats)
@@ -1872,6 +1871,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     @Override
     protected void onStop() {
         super.onStop();
+        if (yugiKeys != null) yugiKeys.stop(); // no event stream in the background
 
         SpinnerDialog.closeDialogs(this);
         Dialog.closeDialogs();
