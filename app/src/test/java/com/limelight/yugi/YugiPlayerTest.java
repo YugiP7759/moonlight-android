@@ -199,7 +199,8 @@ public class YugiPlayerTest {
         int w = a.getResources().getDisplayMetrics().widthPixels, h = a.getResources().getDisplayMetrics().heightPixels;
         layout(decor, w, h);
         p.open(YugiPlayer.Request.parse(new JSONObject(
-                "{\"kind\":\"mp4\",\"id\":\"q\",\"url\":\"https://example.com/a.mp4\","
+                // youtube: a WebView, so no network error (an mp4 that fails to load would close the player)
+                "{\"kind\":\"youtube\",\"id\":\"q\",\"vid\":\"dQw4w9WgXcQ\","
                         + "\"rect\":{\"x\":300,\"y\":200,\"w\":800,\"h\":450,\"sw\":1920,\"sh\":1080},"
                         + "\"view\":{\"x\":0,\"y\":100,\"w\":1920,\"h\":980,\"sw\":1920,\"sh\":1080}}")));
         layout(decor, w, h);
