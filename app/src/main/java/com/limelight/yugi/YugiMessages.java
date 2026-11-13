@@ -123,7 +123,7 @@ final class YugiMessages {
 
     private static TextView textView(Context c, String s, int color) {
         TextView t = YugiTheme.text(c, s == null ? "" : s, 16, 400, color);
-        t.setLineSpacing(0, 1.32f);
+        t.setLineSpacing(0, 1.18f);
         t.setTextDirection(View.TEXT_DIRECTION_FIRST_STRONG);
         t.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
         t.setBreakStrategy(android.text.Layout.BREAK_STRATEGY_HIGH_QUALITY);
@@ -275,7 +275,7 @@ final class YugiMessages {
         card.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         ImageView dl = new ImageView(c);
         dl.setImageResource(R.drawable.yugi_ic_back);
-        dl.setRotation(-90); // arrow down
+        dl.setRotation(90); // arrow down
         dl.setImageTintList(android.content.res.ColorStateList.valueOf(YugiTheme.LINK));
         dl.setScaleType(ImageView.ScaleType.CENTER);
         card.addView(dl, new LinearLayout.LayoutParams(YugiTheme.dp(c, 32), YugiTheme.dp(c, 32)));

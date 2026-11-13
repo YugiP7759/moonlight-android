@@ -192,7 +192,7 @@ public class YugiChrome extends FrameLayout {
             primaryView.setBackground(new RippleDrawable(ColorStateList.valueOf(0x40FFFFFF), YugiTheme.orb(), mask));
             primaryView.setContentDescription(primary.label);
             primaryView.setFocusable(false);
-            primaryView.setOnClickListener(x -> { primary.onClick.run(); if (!chatOpen) poke(); });
+            primaryView.setOnClickListener(x -> primary.onClick.run());
             primary.view = primaryView;
             divider = new View(ctx);
             divider.setBackgroundColor(0x33FFFFFF);

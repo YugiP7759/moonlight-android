@@ -90,7 +90,12 @@ final class YugiMarkdown {
             }
             if (code != null) { code.append(raw).append('\n'); continue; }
             if (raw.trim().isEmpty()) { blank = sb.length() > 0; continue; }
-            if (sb.length() > 0) sb.append(blank ? "\n\n" : "\n");
+            if (blank) {
+                // a blank line: a half-height empty paragraph, not a full line of air
+                int b0 = sb.length();
+                sb.append('\n');
+                sb.setSpan(new RelativeSizeSpan(0.45f), b0, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
             blank = false;
             int start = sb.length();
             Matcher m;
@@ -99,20 +104,25 @@ final class YugiMarkdown {
                 sb.setSpan(new StyleSpan(Typeface.BOLD), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 float size = m.group(1).length() <= 1 ? 1.25f : m.group(1).length() == 2 ? 1.15f : 1.05f;
                 sb.setSpan(new RelativeSizeSpan(size), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                sb.append('\n');
             } else if ((m = BULLET.matcher(raw)).matches()) {
                 int level = Math.min(3, m.group(1).length() / 2);
                 inline(c, sb, m.group(2), r, links);
+                sb.append('\n');
                 sb.setSpan(new Marker(c, null, level), start, sb.length(), Spanned.SPAN_PARAGRAPH);
             } else if ((m = NUMBER.matcher(raw)).matches()) {
                 int level = Math.min(3, m.group(1).length() / 2);
                 inline(c, sb, m.group(3), r, links);
+                sb.append('\n');
                 sb.setSpan(new Marker(c, m.group(2) + ".", level), start, sb.length(), Spanned.SPAN_PARAGRAPH);
             } else if (raw.startsWith(">")) {
                 inline(c, sb, raw.replaceFirst("^>\\s?", ""), r, links);
-                sb.setSpan(new Quote(c), start, sb.length(), Spanned.SPAN_PARAGRAPH);
                 sb.setSpan(new ForegroundColorSpan(YugiTheme.TEXT_DIM), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                sb.append('\n');
+                sb.setSpan(new Quote(c), start, sb.length(), Spanned.SPAN_PARAGRAPH);
             } else {
                 inline(c, sb, raw, r, links);
+                sb.append('\n');
             }
         }
         if (code != null) r.blocks.add(new Block(true, code.toString().replaceAll("\\n$", "")));
@@ -121,7 +131,23 @@ final class YugiMarkdown {
     }
 
     private static void flush(Result r, SpannableStringBuilder sb) {
+        while (sb.length() > 0 && sb.charAt(sb.length() - 1) == '\n') sb.delete(sb.length() - 1, sb.length());
         if (sb.length() > 0) r.blocks.add(new Block(false, sb));
+    }
+
+    /** A bare URL as shown in text: without the scheme, shortened in the middle when long. */
+    static String shortUrl(String url) {
+        String u = url.replaceFirst("^https?://", "").replaceFirst("/$", "");
+        if (u.length() <= 42) return u;
+        return u.substring(0, 26) + "…" + u.substring(u.length() - 14);
+    }
+
+    /** One line of plain text from Markdown (list previews). */
+    static String plain(String md) {
+        return md.replaceAll("```[a-zA-Z]*", " ").replaceAll("\\*\\*|`", "")
+                .replaceAll("\\[([^\\]]+)\\]\\([^)]+\\)", "$1")
+                .replaceAll("(?m)^\\s*(#{1,4}|[-*•]|\\d+[.)])\\s+", "")
+                .replaceAll("\\s+", " ").trim();
     }
 
     private static void inline(Context c, SpannableStringBuilder sb, String s, Result r, LinkHandler links) {
@@ -146,7 +172,7 @@ final class YugiMarkdown {
                     tail = url.charAt(url.length() - 1) + tail;
                     url = url.substring(0, url.length() - 1);
                 }
-                link(sb, "⁦" + url + "⁩", url, r, links);
+                link(sb, "⁦" + shortUrl(url) + "⁩", url, r, links);
                 sb.append(tail);
             } else if (m.group(6) != null) {
                 inline(c, sb, m.group(6), r, links);

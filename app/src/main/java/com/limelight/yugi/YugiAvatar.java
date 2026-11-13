@@ -98,7 +98,9 @@ class YugiAvatar extends View {
             float br = d * 0.15f;
             boolean rtl = getLayoutDirection() == LAYOUT_DIRECTION_RTL;
             // bottom corner on the end side (left in RTL), on the circle's edge
-            float bx = cx + (rtl ? -1 : 1) * r * 0.72f, by = cy + r * 0.72f;
+            float ring = Math.max(2f, d * 0.05f);
+            float off = Math.min(r * 0.72f, r - br - ring); // the badge stays inside the avatar's square
+            float bx = cx + (rtl ? -1 : 1) * off, by = cy + off;
             if (pulsing) {
                 float t = (SystemClock.uptimeMillis() % 1600) / 1600f;
                 badge.setColor(stateColor);
@@ -107,7 +109,7 @@ class YugiAvatar extends View {
             }
             badge.setColor(ringColor);
             badge.setAlpha(255);
-            cv.drawCircle(bx, by, br + Math.max(2f, d * 0.05f), badge);
+            cv.drawCircle(bx, by, br + ring, badge);
             badge.setColor(stateColor);
             cv.drawCircle(bx, by, br, badge);
             if (pulsing && isShown() && getWindowVisibility() == VISIBLE) postInvalidateOnAnimation();

@@ -167,7 +167,8 @@ public class YugiUiScreenshotTest {
         layout(pc, w, h);
         idle();
         layout(pc, w, h);
-        if (pcChrome.visibleRects().size() != 2) problems.add("collapsed chrome should be [more | Yugi], got " + pcChrome.visibleRects().size());
+        int expect = 2 + (pcChrome.isHudVisible() ? 1 : 0); // [more | Yugi] (+ the stats pill)
+        if (pcChrome.visibleRects().size() != expect) problems.add("collapsed chrome should be [more | Yugi], got " + pcChrome.visibleRects().size());
         checkInside("collapsed chrome", pcChrome.visibleRects(), w, h, problems);
         save(pc, name + "-e0b-menu-collapsed");
         pcChrome.setCollapsed(false);
@@ -190,7 +191,8 @@ public class YugiUiScreenshotTest {
         pc.addView(chat, match());
         chat.setOpen(true);
         layout(pc, w, h);
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(70)); // mid-flight: growing out of the orb
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(48)); // mid-flight: growing out of the orb
+        if (chat.cardScaleForTest() > 0.97f) problems.add("the card did not grow out of the orb (scale " + chat.cardScaleForTest() + " after 48ms)");
         save(pc, name + "-e1a-chat-opening");
         idle();
         layout(pc, w, h);
@@ -238,6 +240,15 @@ public class YugiUiScreenshotTest {
         chat.setInsets(0, 0);
         YugiChat.clearPendingForTest();
         chat.rerenderForTest();
+
+        // ---- chat: "/" opens the commands
+        chat.typeForTest("/");
+        idle();
+        layout(pc, w, h);
+        layout(pc, w, h);
+        save(pc, name + "-e5-chat-slash");
+        chat.typeForTest("");
+        idle();
 
         // ---- chat: Yugi thinking (the answer has no words yet)
         YugiChat.setMessagesForTest(Arrays.asList(m1, m2, m5, new YugiChat.Msg("assistant", "")));
@@ -315,6 +326,26 @@ public class YugiUiScreenshotTest {
         drawKeyboard(pc, w, h, ime, name + "-h3-session-keyboard");
         chat.setInsets(0, 0);
 
+        // a command's output as a sheet, and the "/" suggestions of a session
+        ss.typeForTest("/c");
+        idle();
+        layout(pc, w, h);
+        layout(pc, w, h);
+        save(pc, name + "-h5-session-slash");
+        ss.typeForTest("");
+        ss.showCommandOutput("/cost", null, "Session\n\nTotal cost:            $25.22\nTotal duration (API):  40m 9s\n"
+                + "Total duration (wall): 2d 1h 19m\nUsage by model:\n     claude-opus-5-5:  754.9k input, 201.9k output ($22.93)\n"
+                + "   claude-sonnet-5-5:  35.8k input, 41.3k output ($2.25)");
+        idle();
+        ss.settleForTest();
+        layout(pc, w, h);
+        layout(pc, w, h);
+        if (!ss.isSheetShownForTest()) problems.add("command sheet not shown");
+        save(pc, name + "-h6-command-sheet");
+        ss.handleBack();
+        idle();
+        ss.settleForTest();
+
         ss.openDetail(list.getJSONObject(3)); // opened from the Claude app: read only
         ss.onEvent("hello", new org.json.JSONObject("{\"session\":" + list.getJSONObject(3) + ",\"items\":" + ITEMS_JSON + "}"));
         ss.settleForTest();
@@ -372,7 +403,8 @@ public class YugiUiScreenshotTest {
         Rect input = chat.inputRect();
         checkInside(what + " card", List.of(card), w, h - ime, problems);
         int visible = chat.visibleMessageCount();
-        if (visible < (ime > 0 ? 1 : 2)) problems.add(what + ": only " + visible + " message(s) fully visible");
+        if (ime == 0 && visible < 1) problems.add(what + ": no message fully visible");
+        if (!chat.lastMessageVisible()) problems.add(what + ": the newest message is hidden (under the composer or scrolled away)");
         for (String p : chat.chipProblems()) problems.add(what + ": " + p);
         checkInside(what + " input", List.of(input), w, h - ime, problems);
         if (input.height() < 40) problems.add(what + ": input too small " + input);

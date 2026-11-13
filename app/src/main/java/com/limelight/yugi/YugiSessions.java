@@ -163,6 +163,8 @@ public class YugiSessions extends FrameLayout {
     private final YugiAvatar detailAvatar;
     private final LinearLayout inputBox;
     private final LinearLayout attachRow;
+    private final YugiSlashMenu slash;
+    private final YugiSheet sheet;
     private final android.widget.HorizontalScrollView attachScroll;
     private final EditText input;
     private final ImageButton send;
@@ -256,8 +258,9 @@ public class YugiSessions extends FrameLayout {
         dtitles.setPadding(dp(4), 0, dp(8), 0);
         detailAvatar = new YugiAvatar(ctx);
         detailAvatar.setRingColor(0xFF10141B);
-        dhead.addView(detailAvatar, new LinearLayout.LayoutParams(dp(38), dp(38)));
-        dtitles.setPaddingRelative(dp(10), 0, dp(8), 0);
+        LinearLayout.LayoutParams dalp = new LinearLayout.LayoutParams(dp(38), dp(38));
+        dalp.setMarginEnd(dp(12));
+        dhead.addView(detailAvatar, dalp);
         detailTitle = YugiTheme.text(ctx, "", 17, 700, YugiTheme.TEXT);
         detailTitle.setMaxLines(1);
         detailTitle.setEllipsize(TextUtils.TruncateAt.END);
@@ -308,6 +311,20 @@ public class YugiSessions extends FrameLayout {
         LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         rlp.topMargin = dp(4);
         dcol.addView(readOnlyNote, rlp);
+
+        // "/" suggests the usual Claude Code commands; any command can still be typed and sent as is
+        slash = new YugiSlashMenu(ctx, java.util.Arrays.asList(
+                new YugiSlashMenu.Command("clear", "ניקוי ההקשר והתחלה מחדש", false),
+                new YugiSlashMenu.Command("compact", "סיכום השיחה כדי לפנות מקום", false),
+                new YugiSlashMenu.Command("model", "החלפת מודל, למשל /model opus", true),
+                new YugiSlashMenu.Command("context", "כמה מההקשר בשימוש", false),
+                new YugiSlashMenu.Command("cost", "עלות ושימוש בסשן", false),
+                new YugiSlashMenu.Command("status", "מצב הסשן וההגדרות", false),
+                new YugiSlashMenu.Command("effort", "רמת המאמץ של המודל", true)),
+                cmd -> { String t = "/" + cmd.name + (cmd.takesArg ? " " : ""); input.setText(t); input.setSelection(t.length()); slash.setShown(false); });
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        slp.bottomMargin = dp(8);
+        dcol.addView(slash, slp);
 
         // attachments waiting for this session (shared with the chat: one picker, one screenshot)
         attachRow = new LinearLayout(ctx);
@@ -366,15 +383,17 @@ public class YugiSessions extends FrameLayout {
         input.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
             @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
-            @Override public void afterTextChanged(Editable s) { updateSend(); }
+            @Override public void afterTextChanged(Editable s) { updateSend(); slash.update(s); }
         });
         LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         ilp.topMargin = dp(4);
         dcol.addView(inputBox, ilp);
         updateSend();
         detailPage.addView(dcol, match());
+        sheet = new YugiSheet(ctx);
         detailPage.setVisibility(INVISIBLE);
         addView(detailPage, match());
+        addView(sheet, match()); // command output, over both pages
 
         // Navigation springs: snappy, no bounce, interruptible mid-flight (tap back while pushing)
         listX = spring(listPage);
@@ -492,8 +511,9 @@ public class YugiSessions extends FrameLayout {
 
     public boolean isInDetail() { return inDetail; }
 
-    /** Back gesture: detail -> list -> (false: let the chat handle it). */
+    /** Back gesture: sheet -> detail -> list -> (false: let the chat handle it). */
     public boolean handleBack() {
+        if (sheet.isShownNow()) { sheet.setShown(false); return true; }
         if (inDetail) { popDetail(); return true; }
         return false;
     }
@@ -630,10 +650,11 @@ public class YugiSessions extends FrameLayout {
         YugiAvatar av = new YugiAvatar(c).set(app ? YugiAvatar.YUGI : s.optString("area"), name);
         av.setRingColor(YugiTheme.CARD);
         av.setState("waiting".equals(state) ? 0 : stateColor(state), "working".equals(state));
-        face.addView(av, new LinearLayout.LayoutParams(dp(46), dp(46)));
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(dp(46), dp(46));
+        alp.setMarginEnd(dp(14));
+        face.addView(av, alp);
 
         LinearLayout texts = column(c);
-        texts.setPaddingRelative(dp(12), 0, 0, 0);
         LinearLayout top = new LinearLayout(c);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
@@ -666,7 +687,7 @@ public class YugiSessions extends FrameLayout {
         JSONObject last = s.optJSONObject("lastMessage");
         if (last != null) {
             String who = "user".equals(last.optString("role")) ? "אתה: " : "";
-            TextView lm = YugiTheme.text(c, who + oneLine(last.optString("text")), 14, 400, YugiTheme.TEXT_DIM);
+            TextView lm = YugiTheme.text(c, who + YugiMarkdown.plain(last.optString("text")), 14, 400, YugiTheme.TEXT_DIM);
             lm.setMaxLines(2);
             lm.setEllipsize(TextUtils.TruncateAt.END);
             lm.setLineSpacing(0, 1.2f);
@@ -685,7 +706,7 @@ public class YugiSessions extends FrameLayout {
             View sep = new View(c);
             sep.setBackgroundColor(0x1AFFFFFF);
             FrameLayout.LayoutParams slp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, dp(0.5f)), Gravity.BOTTOM);
-            slp.setMarginStart(dp(14 + 46 + 12));
+            slp.setMarginStart(dp(14 + 46 + 14));
             holder.addView(sep, slp);
         }
 
@@ -995,7 +1016,7 @@ public class YugiSessions extends FrameLayout {
         String text = input.getText().toString().trim();
         List<YugiChat.Attachment> atts = new ArrayList<>(YugiChat.pendingAttachments());
         if ((text.isEmpty() && atts.isEmpty()) || currentId == null) return;
-        if (text.startsWith("/")) { addSystem("פקודות עם / לא נשלחות מכאן"); scrollToEnd(); return; }
+        if (text.startsWith("/") && atts.isEmpty()) { input.setText(""); sendCommand(text); return; }
         input.setText("");
         YugiChat.clearPending();
         View loading = msgList.findViewWithTag("loading");
@@ -1052,6 +1073,61 @@ public class YugiSessions extends FrameLayout {
             });
         }, "YugiSessionsSend").start();
     }
+
+    /**
+     * A command (/clear, /model opus, /cost…) goes to the session as is, like in the terminal. What it printed,
+     * or the panel it opened, comes back and shows in a sheet.
+     */
+    private void sendCommand(String text) {
+        slash.setShown(false);
+        View loading = msgList.findViewWithTag("loading");
+        if (loading != null) msgList.removeView(loading);
+        hideKeyboard();
+        YugiMessages.Row mine = addBubble("user", text, null, true);
+        stickToBottom = true;
+        scrollToEnd();
+        if (offline || currentId == null) return;
+        final String id = currentId;
+        JSONObject body = new JSONObject();
+        try { body.put("text", text); } catch (Exception ignored) {}
+        http.newCall(req("/sessions/" + id + "/message")
+                .post(RequestBody.create(body.toString().getBytes(StandardCharsets.UTF_8), MediaType.get("application/json")))
+                .build()).enqueue(new okhttp3.Callback() {
+            @Override public void onFailure(Call call, java.io.IOException e) {
+                ui.post(() -> failed(mine, text, "אין חיבור לשרת. הפקודה לא נשלחה"));
+            }
+            @Override public void onResponse(Call call, Response r) {
+                int code = r.code();
+                JSONObject o = null;
+                try (Response res = r) {
+                    if (res.body() != null) o = new JSONObject(res.body().string());
+                } catch (Exception ignored) {}
+                final JSONObject d = o == null ? new JSONObject() : o;
+                ui.post(() -> {
+                    if (code != 200) {
+                        String m = d.optString("message", "");
+                        failed(mine, text, m.isEmpty() ? "הפקודה לא נשלחה (" + code + ")" : m);
+                        return;
+                    }
+                    String out = d.optString("output", "");
+                    String msg = d.optString("message", "");
+                    if (!out.isEmpty()) showCommandOutput(text.split("\\s")[0], d.isNull("note") ? null : d.optString("note", null), out);
+                    else if (!msg.isEmpty()) addSystem(msg);
+                    scrollToEnd();
+                });
+            }
+        });
+    }
+
+    /** The sheet with what a command printed (tests call it directly). */
+    void showCommandOutput(String title, String note, String output) {
+        sheet.show(title, note, output);
+    }
+
+    boolean isSheetShownForTest() { return sheet.isShownNow(); }
+
+    /** Tests: type into the session's composer. */
+    void typeForTest(String t) { input.setText(t); }
 
     /** Uploads one attachment for this session; returns the server path or null. Runs off the UI thread. */
     private static String uploadTo(String id, YugiChat.Attachment a) {
@@ -1153,5 +1229,6 @@ public class YugiSessions extends FrameLayout {
         }
         for (int i = 0; i < msgList.getChildCount(); i++) YugiMessages.settle(msgList.getChildAt(i));
         for (YugiSwipeRow r : rows) r.settleForTest();
+        sheet.settleForTest();
     }
 }

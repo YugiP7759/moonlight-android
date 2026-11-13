@@ -162,6 +162,7 @@ public class YugiChat extends FrameLayout {
     private final HorizontalScrollView attachScroll;
     private final LinearLayout inputBox;
     private final LinearLayout composer;
+    private final YugiSlashMenu slash;
     private final View hair;
     /** The server's Yugi sessions, shown in place of this conversation (same card). */
     private final YugiSessions sessions;
@@ -286,7 +287,7 @@ public class YugiChat extends FrameLayout {
 
         // soft fade where the conversation slides under the composer
         View fade = new View(ctx);
-        fade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0x000B0E14, 0xF20B0E14}));
+        fade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0x000B0E14, 0x8C0B0E14}));
         card.fade = fade;
         card.addView(fade);
 
@@ -344,7 +345,7 @@ public class YugiChat extends FrameLayout {
         input.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
             @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
-            @Override public void afterTextChanged(Editable s) { updateSendButton(); }
+            @Override public void afterTextChanged(Editable s) { updateSendButton(); if (slash != null) slash.update(s); }
         });
         inputBox.addView(input, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         micSend = new ImageButton(ctx);
@@ -359,6 +360,14 @@ public class YugiChat extends FrameLayout {
         composer.addView(inputBox, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         card.input = composer;
         card.addView(composer);
+        // "/" opens the commands this chat understands (it runs `claude -p`, so the bridge does them)
+        slash = new YugiSlashMenu(ctx, java.util.Arrays.asList(
+                new YugiSlashMenu.Command("new", "שיחה חדשה", false),
+                new YugiSlashMenu.Command("clear", "ניקוי השיחה והתחלה מחדש", false),
+                new YugiSlashMenu.Command("stop", "עצירת התשובה של יוגי", false)),
+                cmd -> { input.setText(""); runCommand(cmd.name); });
+        card.slash = slash;
+        card.addView(slash);
         updateSendButton();
 
         // ---- sessions panel (on top of everything in the card while shown) ----
@@ -428,7 +437,7 @@ public class YugiChat extends FrameLayout {
      * With little room (keyboard open on the cover screen) the chips go first, then the header.
      */
     static final class ChatCard extends ViewGroup {
-        View header, hair, scroll, fade, input, sessions, chips;
+        View header, hair, scroll, fade, input, sessions, chips, slash;
         interface Swipe { void onSwipe(int step); }
         interface SwipeGate { boolean allowed(); }
         Swipe swipe;
@@ -528,6 +537,9 @@ public class YugiChat extends FrameLayout {
             if (scroll.getPaddingBottom() != padBottom) scroll.setPadding(0, dp(6), 0, padBottom);
             scroll.measure(exactW, MeasureSpec.makeMeasureSpec(Math.max(0, avail), MeasureSpec.EXACTLY));
             fade.measure(exactW, MeasureSpec.makeMeasureSpec(dp(28), MeasureSpec.EXACTLY));
+            if (slash != null && slash.getVisibility() != GONE) {
+                slash.measure(exactW, MeasureSpec.makeMeasureSpec(Math.max(0, h - getPaddingTop() - getPaddingBottom() - composerH - dp(8)), MeasureSpec.AT_MOST));
+            }
             if (sessionsShown()) {
                 sessions.measure(exactW, MeasureSpec.makeMeasureSpec(Math.max(0, h - getPaddingTop() - getPaddingBottom() - chipsH()), MeasureSpec.EXACTLY));
             }
@@ -560,6 +572,10 @@ public class YugiChat extends FrameLayout {
             input.layout(left, bottom - input.getMeasuredHeight(), right, bottom);
             int ft = bottom - input.getMeasuredHeight() - fade.getMeasuredHeight() + dp(10);
             fade.layout(left, ft, right, ft + fade.getMeasuredHeight());
+            if (slash != null && slash.getVisibility() != GONE) {
+                int sb = bottom - input.getMeasuredHeight() - dp(8);
+                slash.layout(left, sb - slash.getMeasuredHeight(), right, sb);
+            }
             if (sessionsShown()) {
                 sessions.layout(left, contentTop, right, contentTop + sessions.getMeasuredHeight());
             }
@@ -654,7 +670,7 @@ public class YugiChat extends FrameLayout {
     protected void onLayout(boolean changed, int l, int t, int r, int b) {
         Rect c = cardRect(r - l, b - t);
         card.layout(c.left, c.top, c.right, c.bottom);
-        if (stickToBottom) {
+        if (stickToBottom && list.findViewWithTag("empty") == null) {
             // Newest messages stay in view when the card shrinks (keyboard) or grows
             scroll.scrollTo(0, Math.max(0, list.getMeasuredHeight() + scroll.getPaddingTop() + scroll.getPaddingBottom() - scroll.getHeight()));
         }
@@ -1213,6 +1229,18 @@ public class YugiChat extends FrameLayout {
         return out;
     }
 
+    /** The newest message ends above the composer (the conversation is stuck to its end). */
+    boolean lastMessageVisible() {
+        if (list.getChildCount() == 0) return true;
+        View v = list.getChildAt(list.getChildCount() - 1);
+        int top = scroll.getScrollY(), bottom = top + scroll.getHeight() - scroll.getPaddingBottom();
+        int vb = list.getTop() + v.getBottom();
+        return vb <= bottom + dp(2) && vb > top;
+    }
+
+    /** Tests: type into the composer (the slash menu follows). */
+    void typeForTest(String t) { input.setText(t); }
+
     /** Messages fully visible in the list right now. */
     int visibleMessageCount() {
         // above the floating composer (the list's bottom padding is the composer's room)
@@ -1258,6 +1286,7 @@ public class YugiChat extends FrameLayout {
     }
 
     private void scrollToEnd() {
+        if (list.findViewWithTag("empty") != null) { scroll.post(() -> scroll.scrollTo(0, 0)); return; } // the welcome reads from the top
         scroll.post(() -> scroll.smoothScrollTo(0, Math.max(0,
                 list.getHeight() + scroll.getPaddingTop() + scroll.getPaddingBottom() - scroll.getHeight())));
     }
@@ -1388,6 +1417,11 @@ public class YugiChat extends FrameLayout {
     private void sendTyped() {
         String t = input.getText().toString().trim();
         if (t.isEmpty() && pending.isEmpty()) return;
+        if (t.startsWith("/") && !t.contains(" ")) {
+            input.setText("");
+            runCommand(t.substring(1).toLowerCase(Locale.ROOT));
+            return;
+        }
         input.setText("");
         speakNext = false;
         send(t);
@@ -1517,6 +1551,31 @@ public class YugiChat extends FrameLayout {
             if (err == null && speakNext) speak(answer.text.toString());
             speakNext = false;
         });
+    }
+
+    /** The main chat's commands: /new and /clear start over, /stop stops the answer; anything else is explained. */
+    private void runCommand(String name) {
+        if (slash != null) slash.setShown(false);
+        switch (name) {
+            case "new":
+            case "clear":
+                reset();
+                break;
+            case "stop":
+                if (busy) stop(); else note("אין תשובה פעילה לעצור");
+                break;
+            default:
+                note("הפקודה /" + name + " לא נתמכת בצ'אט הזה. אפשר: /new, /clear, /stop");
+        }
+    }
+
+    /** A small centered note in the conversation (not sent to Yugi). */
+    private void note(String text) {
+        Msg m = new Msg("system", text);
+        synchronized (messages) { messages.add(m); }
+        addRow(m, true);
+        stickToBottom = true;
+        scrollToEnd();
     }
 
     private void stop() {
