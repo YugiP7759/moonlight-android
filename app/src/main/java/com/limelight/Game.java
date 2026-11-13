@@ -1879,6 +1879,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         super.onStop();
         if (yugiPlayer != null) yugiPlayer.release(); // the position goes back to the desktop
         if (yugiKeys != null) yugiKeys.stop(); // no event stream in the background
+        com.limelight.yugi.YugiPhoneStatus.stop(); // no phone status in the background
 
         SpinnerDialog.closeDialogs(this);
         Dialog.closeDialogs();
@@ -3714,6 +3715,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private void stopConnection() {
         if (yugi) {
             com.limelight.yugi.YugiMedia.stop();
+            com.limelight.yugi.YugiPhoneStatus.stop();
         }
         stopMicrophoneCapture();
 
@@ -4020,6 +4022,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                         b.postDelayed(() -> b.fadeOutAndRemove(300), 150);
                     }
                     com.limelight.yugi.YugiMedia.start(Game.this);
+                    com.limelight.yugi.YugiPhoneStatus.start(Game.this); // battery / Wi-Fi / signal for the desktop bar
                 }
 
                 // Hide the mouse cursor now after a short delay.
