@@ -57,8 +57,8 @@ public final class YugiConfig {
     /** Client name shown in Sunshine's paired-devices list. */
     public static final String CLIENT_NAME = "YugiPC";
 
-    /** Side channel for mic + camera (WHIP). Used once the WHIP module is merged. */
-    public static final String WHIP_URL = "http://100.104.166.48:8890/whip";
+    /** Side channel for mic + camera (WHIP, module `whip/`): http://<host>:WHIP_PORT/whip */
+    public static final int WHIP_PORT = 8890;
 
     /**
      * Known screens (physical px, landscape-first) for reference and sanity checks.

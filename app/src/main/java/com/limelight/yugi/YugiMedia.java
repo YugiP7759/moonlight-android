@@ -8,7 +8,7 @@ import android.app.Activity;
  */
 public final class YugiMedia {
     public interface Bridge {
-        void start(Activity activity, String whipUrl);
+        void start(Activity activity, String host, int port);
         void stop();
         void setMicEnabled(boolean enabled);
         void setCameraEnabled(boolean enabled);
@@ -21,13 +21,35 @@ public final class YugiMedia {
 
     private YugiMedia() {}
 
+    /** Registers the built-in WHIP sender (module `whip/`). */
+    public static void registerDefault() {
+        if (bridge == null) register(new WhipBridge());
+    }
+
+    /** Adapter from the WHIP module's WhipStreamer to this bridge. */
+    private static final class WhipBridge implements Bridge {
+        private final com.yugipc.whip.WhipStreamer whip = new com.yugipc.whip.WhipStreamer();
+
+        WhipBridge() {
+            whip.setStateListener((state, message, fatal) ->
+                    com.limelight.LimeLog.info("YugiPC WHIP: " + state + (message != null ? " " + message : "")
+                            + (fatal ? " (fatal)" : "")));
+        }
+
+        @Override public void start(Activity activity, String host, int port) { whip.start(activity, host, port); }
+        @Override public void stop() { whip.stop(); }
+        @Override public void setMicEnabled(boolean enabled) { whip.setMicEnabled(enabled); }
+        @Override public void setCameraEnabled(boolean enabled) { whip.setCameraEnabled(enabled); }
+        @Override public void switchCamera() { whip.switchCamera(); }
+    }
+
     public static void register(Bridge b) { bridge = b; }
     public static boolean isAvailable() { return bridge != null; }
 
     public static void start(Activity a) {
         Bridge b = bridge;
         if (b != null) {
-            b.start(a, YugiConfig.WHIP_URL);
+            b.start(a, YugiConfig.host, YugiConfig.WHIP_PORT);
             b.setMicEnabled(micOn);
             b.setCameraEnabled(camOn);
         }
