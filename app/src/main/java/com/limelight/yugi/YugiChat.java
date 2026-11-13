@@ -121,6 +121,12 @@ public class YugiChat extends FrameLayout {
             .readTimeout(0, TimeUnit.MILLISECONDS) // SSE
             .writeTimeout(60, TimeUnit.SECONDS)
             .build();
+    // The bridge pings every 15 s, so a silent minute means the connection died (phone slept, network
+    // switched). Without this the read blocks forever and `busy` locks the chat until the app restarts.
+    private static final OkHttpClient streamHttp = http.newBuilder()
+            .readTimeout(60, TimeUnit.SECONDS)
+            .build();
+    private static volatile Call activeCall;
 
     public static boolean isChatEnabled() {
         return !BuildConfig.YUGI_CHAT_TOKEN.isEmpty();
@@ -155,6 +161,7 @@ public class YugiChat extends FrameLayout {
     private int imeInset;
     private int navInset;
     private TextView liveBubble;
+    private YugiChatBubble fab;
     private TextToSpeech tts;
     private boolean ttsReady;
     private boolean speakNext;
@@ -380,6 +387,7 @@ public class YugiChat extends FrameLayout {
         if (!isChatEnabled()) return null;
         YugiChat c = new YugiChat(a, host);
         a.addContentView(c, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        c.fab = YugiChatBubble.attach(a, c::toggle);
         current = c;
         c.renderPending();
         if (reopenOnAttach) {
@@ -474,6 +482,7 @@ public class YugiChat extends FrameLayout {
 
     public void setOpen(boolean o) {
         open = o;
+        if (fab != null) fab.setShown(!o);
         if (o) {
             setVisibility(VISIBLE);
             card.setAlpha(0f);
@@ -892,9 +901,10 @@ public class YugiChat extends FrameLayout {
         String error = null;
         JSONObject body = new JSONObject();
         try { body.put("text", prompt); body.put("display", display); } catch (Exception ignored) {}
-        Call call = http.newCall(req("/chat")
+        Call call = streamHttp.newCall(req("/chat")
                 .post(RequestBody.create(body.toString().getBytes(StandardCharsets.UTF_8), MediaType.get("application/json")))
                 .build());
+        activeCall = call;
         try (Response res = call.execute()) {
             if (res.code() == 409) {
                 error = "יוגי עסוק בבקשה אחרת. נסה שוב בעוד רגע";
@@ -928,8 +938,11 @@ public class YugiChat extends FrameLayout {
                 }
             }
         } catch (Exception e) {
-            error = "אין חיבור ליוגי";
+            error = call.isCanceled() ? "נעצר"
+                    : (answer.text.length() > 0 ? "החיבור נותק. התשובה המלאה תופיע בשיחה" : "אין חיבור ליוגי");
             LimeLog.warning("YugiChat: " + e);
+        } finally {
+            if (activeCall == call) activeCall = null;
         }
         finish(answer, error);
     }
@@ -953,6 +966,9 @@ public class YugiChat extends FrameLayout {
     }
 
     private void stop() {
+        // Free the panel right away even if the stream is dead; the server stops the turn on its side.
+        Call c = activeCall;
+        if (c != null) c.cancel();
         http.newCall(req("/stop").post(RequestBody.create(new byte[0], null)).build()).enqueue(new okhttp3.Callback() {
             @Override public void onFailure(Call call, java.io.IOException e) {}
             @Override public void onResponse(Call call, Response r) { r.close(); }

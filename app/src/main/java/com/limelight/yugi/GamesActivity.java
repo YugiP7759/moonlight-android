@@ -268,9 +268,7 @@ public class GamesActivity extends Activity {
 
     private void buildOverlay() {
         List<YugiChrome.Button> buttons = new ArrayList<>();
-        if (YugiChat.isChatEnabled()) {
-            buttons.add(new YugiChrome.Button(R.drawable.yugi_ic_yugi, "יוגי", () -> { if (chat != null) chat.toggle(); }));
-        }
+        // יוגי: the draggable floating bubble (YugiChatBubble), not a toolbar button
         padButton = new YugiChrome.Button(R.drawable.yugi_ic_gamepad, "הצג או הסתר שלט", this::togglePad);
         padButton.active = pad.isPadEnabled();
         buttons.add(padButton);

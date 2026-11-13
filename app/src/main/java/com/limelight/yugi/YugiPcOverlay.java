@@ -26,9 +26,7 @@ public final class YugiPcOverlay {
     public static YugiPcOverlay attach(Activity a, SurfaceView surface, Runnable openGames) {
         YugiPcOverlay o = new YugiPcOverlay();
         List<YugiChrome.Button> buttons = new ArrayList<>();
-        if (YugiChat.isChatEnabled()) {
-            buttons.add(new YugiChrome.Button(R.drawable.yugi_ic_yugi, "יוגי", () -> { if (o.chat != null) o.chat.toggle(); }));
-        }
+        // יוגי: the draggable floating bubble (YugiChatBubble), not a toolbar button
         o.keyboardButton = new YugiChrome.Button(R.drawable.yugi_ic_keyboard, "מקלדת", () -> {
             if (o.keyboardAction != null) o.keyboardAction.run();
         });
