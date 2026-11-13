@@ -20,6 +20,7 @@ public final class YugiTheme {
     private YugiTheme() {}
 
     // Palette
+    public static final int BRAND_BG = 0xFF0B0E14;     // window / splash background
     public static final int GLASS = 0xE60B0E14;        // panels: ~90% dark
     public static final int GLASS_STRONG = 0xF20B0E14;
     public static final int SURFACE = 0xFF1A1F29;      // inputs, user bubbles

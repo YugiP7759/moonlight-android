@@ -128,7 +128,7 @@
             android:hardwareAccelerated="true"
             android:resizeableActivity="true"
             android:screenOrientation="fullSensor"
-            android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
+            android:theme="@style/YugiPC.Screen"
             android:windowSoftInputMode="adjustNothing"
             android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection|density" />
         <!-- YugiPC: file picker host for the Yugi chat -->
@@ -144,7 +144,7 @@
             android:screenOrientation="fullSensor"
             android:label="YugiPC"
             android:resizeableActivity="true"
-            android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
+            android:theme="@style/YugiPC.Launch"
             android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection|density">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

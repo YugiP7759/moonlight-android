@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ SplashScreen API: brand dark background with the YugiPC logo -->
+    <style name="YugiPC.Launch" parent="@android:style/Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@drawable/yugipc_window_bg</item>
+        <item name="android:windowSplashScreenBackground">@color/yugipc_bg</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/yugipc_icon_fg</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/yugipc_bg</item>
+        <item name="android:statusBarColor">@color/yugipc_bg</item>
+        <item name="android:navigationBarColor">@color/yugipc_bg</item>
+    </style>
+</resources>

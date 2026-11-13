@@ -53,10 +53,6 @@ public class YugiLauncher extends Activity {
     private static final String KEY_LAST_FPS = "last_fps";
 
     private final Handler ui = new Handler(Looper.getMainLooper());
-    private TextView status;
-    private ProgressBar progress;
-    private Button retry;
-    private Button exit;
     private boolean working;
     private boolean launchedGame;
     private Runnable pendingAutoRetry;
@@ -119,7 +115,6 @@ public class YugiLauncher extends Activity {
                 return;
             }
             showStatus("מתחבר מחדש…", true);
-            ui.post(() -> exit.setVisibility(View.VISIBLE));
             scheduleRetry(1500);
         } else if (!working) {
             connect();
@@ -147,55 +142,26 @@ public class YugiLauncher extends Activity {
         return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
     }
 
+    private YugiBrandView brand;
+
     private void buildUi() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setGravity(Gravity.CENTER);
-        root.setBackgroundColor(Color.parseColor("#0B1220"));
-        root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        root.setPadding(dp(24), dp(24), dp(24), dp(24));
-
-        progress = new ProgressBar(this);
-        root.addView(progress, new LinearLayout.LayoutParams(dp(48), dp(48)));
-
-        status = new TextView(this);
-        status.setTextColor(Color.WHITE);
-        status.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
-        status.setGravity(Gravity.CENTER);
-        status.setPadding(0, dp(16), 0, dp(16));
-        root.addView(status, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-
-        retry = new Button(this);
-        retry.setText("נסה שוב");
-        retry.setTypeface(Typeface.DEFAULT_BOLD);
-        retry.setMinHeight(dp(48));
-        retry.setMinWidth(dp(160));
-        retry.setOnClickListener(v -> connect());
-        retry.setVisibility(View.GONE);
-        root.addView(retry);
-
-        exit = new Button(this);
-        exit.setText("יציאה");
-        exit.setMinHeight(dp(48));
-        exit.setMinWidth(dp(160));
-        exit.setOnClickListener(v -> {
+        brand = new YugiBrandView(this);
+        brand.setActions("נסה שוב", this::connect, "יציאה", () -> {
             if (pendingAutoRetry != null) ui.removeCallbacks(pendingAutoRetry);
             finishAndRemoveTask();
         });
-        exit.setVisibility(View.GONE);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = dp(8);
-        root.addView(exit, lp);
-
-        setContentView(root);
+        setContentView(brand);
+        if (Build.VERSION.SDK_INT >= 31) {
+            // Android 12+ splash: fade the system splash into the identical branded screen
+            getSplashScreen().setOnExitAnimationListener(v -> v.animate().alpha(0f).setDuration(250)
+                    .withEndAction(v::remove).start());
+        }
     }
 
     private void showStatus(String text, boolean busy) {
         ui.post(() -> {
-            status.setText(text);
-            progress.setVisibility(busy ? View.VISIBLE : View.INVISIBLE);
-            retry.setVisibility(busy ? View.GONE : View.VISIBLE);
-            exit.setVisibility(busy ? View.GONE : View.VISIBLE);
+            brand.setStatus(text);
+            brand.setBusy(busy);
         });
     }
 
@@ -259,7 +225,7 @@ public class YugiLauncher extends Activity {
             ui.removeCallbacks(pendingAutoRetry);
             pendingAutoRetry = null;
         }
-        showStatus("מתחבר למחשב…", true);
+        showStatus("מתחבר למחשב שלך…", true);
         final StreamSize size = computeStreamSize();
         new Thread(() -> runConnect(size), "YugiConnect").start();
     }
@@ -278,7 +244,7 @@ public class YugiLauncher extends Activity {
                 showError("אין חיבור לרשת. ודא שיש אינטרנט ונסה שוב");
                 return;
             }
-            showStatus("מתחבר למחשב…", true);
+            showStatus("מתחבר למחשב שלך…", true);
             addr = new ComputerDetails.AddressTuple(YugiConfig.host, YugiConfig.HTTP_PORT);
         }
 

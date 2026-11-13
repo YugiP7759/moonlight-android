@@ -58,6 +58,11 @@ public final class YugiPcOverlay {
         return o;
     }
 
+    /** Saves the current frame as the next session's placeholder. */
+    public static void captureLastFrame(Activity a, SurfaceView sv) {
+        capture(sv, b -> YugiBrandView.saveLastFrame(a, b));
+    }
+
     /** Current desktop frame straight from the video surface (without overlays). */
     static void capture(SurfaceView sv, YugiChat.BitmapCallback cb) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N || sv == null || sv.getWidth() <= 0

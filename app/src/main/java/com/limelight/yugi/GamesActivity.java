@@ -113,7 +113,7 @@ public class GamesActivity extends Activity {
         force169 = sp.getBoolean("force169", true);
 
         root = new FrameLayout(this);
-        root.setBackgroundColor(Color.BLACK);
+        root.setBackgroundColor(YugiTheme.BRAND_BG);
         setContentView(root);
 
         web = new WebView(this);

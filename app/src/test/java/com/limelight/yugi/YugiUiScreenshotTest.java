@@ -180,6 +180,33 @@ public class YugiUiScreenshotTest {
         checkChat("chat+keyboard", chat, pcChrome, w, h, ime, problems);
         drawKeyboard(pc, w, h, ime, name + "-f-chat-keyboard");
 
+        // ---- launch sequence: splash -> branded connecting (with and without last frame) -> error
+        android.graphics.drawable.Drawable splash = a.getDrawable(R.drawable.yugipc_launch_bg);
+        Bitmap sb = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        splash.setBounds(0, 0, w, h);
+        splash.draw(new Canvas(sb));
+        write(sb, name + "-g1-splash");
+        new java.io.File(a.getFilesDir(), "last_frame.jpg").delete();
+        YugiBrandView brand = new YugiBrandView(a);
+        layout(brand, w, h);
+        save(brand, name + "-g2-connecting");
+        Bitmap last = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        screen(a, "pc").draw(new Canvas(last)); // placeholder content
+        FrameLayout desk = screen(a, "pc");
+        layout(desk, w, h);
+        desk.draw(new Canvas(last));
+        try (FileOutputStream fo = new FileOutputStream(new java.io.File(a.getFilesDir(), "last_frame.jpg"))) {
+            last.compress(Bitmap.CompressFormat.JPEG, 80, fo);
+        }
+        YugiBrandView brand2 = new YugiBrandView(a);
+        layout(brand2, w, h);
+        save(brand2, name + "-g3-connecting-last-frame");
+        brand2.setActions("נסה שוב", () -> {}, "יציאה", () -> {});
+        brand2.setStatus("אין חיבור. ודא שיש אינטרנט ונסה שוב");
+        brand2.setBusy(false);
+        layout(brand2, w, h);
+        save(brand2, name + "-g4-error");
+
         assertTrue(name + ":\n" + String.join("\n", problems), problems.isEmpty());
     }
 

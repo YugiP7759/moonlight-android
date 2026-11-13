@@ -194,6 +194,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private android.widget.ImageView yugiFrozen;
     private int yugiRotation;
     private com.limelight.yugi.YugiChat yugiChat;
+    private com.limelight.yugi.YugiBrandView yugiBrand;
     private boolean connecting = false;
     public boolean connected = false;
     private boolean autoEnterPip = false;
@@ -414,6 +415,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
 
         // Inflate the content
+        if (yugi) {
+            // Brand background from the first frame of this window (never a black flash)
+            getWindow().setBackgroundDrawableResource(R.drawable.yugipc_window_bg);
+        }
         setContentView(R.layout.activity_game);
 
         clipboardManager = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
@@ -507,6 +512,13 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         if (yugi) {
             yugiRotation = getWindowManager().getDefaultDisplay().getRotation();
             yugiFrozen = com.limelight.yugi.YugiTransition.addFrozenFrame(this, true);
+            if (yugiFrozen == null) {
+                // Same branded screen as the launcher, with last session's frame blurred behind;
+                // it crossfades to the first frame of the stream
+                yugiBrand = new com.limelight.yugi.YugiBrandView(this);
+                addContentView(yugiBrand, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            }
             com.limelight.yugi.YugiFps.reset(() -> runOnUiThread(this::yugiRestart));
             com.limelight.yugi.YugiPcOverlay overlay = com.limelight.yugi.YugiPcOverlay.attach(
                     this, streamContainer.getSurfaceView(), this::yugiOpenGames);
@@ -1830,6 +1842,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     protected void onPause() {
+        if (yugi && connected) {
+            // Keep the last frame: shown blurred while the next session connects
+            com.limelight.yugi.YugiPcOverlay.captureLastFrame(this, streamContainer.getSurfaceView());
+        }
         if (isFinishing()) {
             // Stop any further input device notifications before we lose focus (and pointer capture)
             if (controllerHandler != null) {
@@ -3879,6 +3895,12 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                     }
                     com.limelight.yugi.YugiTransition.fadeOut(yugiFrozen);
                     yugiFrozen = null;
+                    if (yugiBrand != null) {
+                        final com.limelight.yugi.YugiBrandView b = yugiBrand;
+                        yugiBrand = null;
+                        // Give the decoder a moment to show the first frame, then crossfade (300 ms)
+                        b.postDelayed(() -> b.fadeOutAndRemove(300), 150);
+                    }
                     com.limelight.yugi.YugiMedia.start(Game.this);
                 }
 

@@ -585,12 +585,13 @@ public class YugiChat extends FrameLayout {
             ic.setImageTintList(android.content.res.ColorStateList.valueOf(YugiTheme.TEXT_DIM));
             ic.setTag("part");
             chip.addView(ic, new LinearLayout.LayoutParams(dp(18), dp(18)));
-            TextView name = YugiTheme.text(c, a.name, 13, 400, YugiTheme.TEXT);
+            // File names read left-to-right ("הצעת מחיר.pdf"), isolated from the RTL layout
+            TextView name = YugiTheme.text(c, "\u2066" + a.name + "\u2069", 13, 400, YugiTheme.TEXT);
             name.setPadding(dp(8), 0, 0, 0);
             name.setMaxLines(1);
             name.setMaxWidth(dp(compact ? 96 : 140));
             name.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            name.setTextDirection(TEXT_DIRECTION_FIRST_STRONG);
+            name.setTextDirection(TEXT_DIRECTION_LTR);
             name.setTag("part");
             chip.addView(name, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             content = chip;
@@ -661,6 +662,12 @@ public class YugiChat extends FrameLayout {
                     View p = g.getChildAt(k);
                     if (!"part".equals(p.getTag())) continue;
                     if (p.getWidth() <= 0 || p.getHeight() <= 0) out.add("chip " + i + ": part " + k + " has no size");
+                    if (p instanceof TextView) {
+                        CharSequence t = ((TextView) p).getText();
+                        boolean isolated = t.length() > 1 && t.charAt(0) == '\u2066' && t.charAt(t.length() - 1) == '\u2069'
+                                && p.getTextDirection() == TEXT_DIRECTION_LTR;
+                        if (!isolated) out.add("chip " + i + ": file name is not bidi-isolated LTR: " + t);
+                    }
                 }
             }
         }

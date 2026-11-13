@@ -1,4 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="yugipc_icon_bg">#14203A</color>
+    <color name="yugipc_bg">#0B0E14</color>
+
+    <!-- Launcher: shows the branded splash immediately (no black or white flash) -->
+    <style name="YugiPC.Launch" parent="@android:style/Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@drawable/yugipc_launch_bg</item>
+        <item name="android:statusBarColor">@color/yugipc_bg</item>
+        <item name="android:navigationBarColor">@color/yugipc_bg</item>
+        <item name="android:windowDisablePreview">false</item>
+    </style>
+
+    <!-- Other YugiPC screens -->
+    <style name="YugiPC.Screen" parent="@android:style/Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@drawable/yugipc_window_bg</item>
+        <item name="android:statusBarColor">@color/yugipc_bg</item>
+        <item name="android:navigationBarColor">@color/yugipc_bg</item>
+    </style>
 </resources>
