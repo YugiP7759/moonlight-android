@@ -14,6 +14,11 @@ android {
         versionName "20.2.6"
         versionCode = 57
 
+        // YugiPC: build-time secrets (never committed; injected by CI from GitHub secrets)
+        buildConfigField "String", "SUNSHINE_USER", "\"${System.getenv('SUNSHINE_USER') ?: ''}\""
+        buildConfigField "String", "SUNSHINE_PASS", "\"${System.getenv('SUNSHINE_PASS') ?: ''}\""
+        buildConfigField "String", "TS_AUTHKEY", "\"${System.getenv('TS_AUTHKEY') ?: ''}\""
+
         // Generate native debug symbols to allow Google Play to symbolicate our native crashes
         ndk.debugSymbolLevel = 'FULL'
     }
@@ -56,7 +61,7 @@ android {
                     "obtainium_app_url",
                     "https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22com.limelight.noir%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2FClassicOldSong%2Fmoonlight-android%22%2C%22author%22%3A%22ClassicOldSong%22%2C%22name%22%3A%22Artemis%22%2C%22additionalSettings%22%3A%22%7B%5C%22apkFilterRegEx%5C%22%3A%5C%22nonRoot%5C%22%2C%5C%22matchGroutToUse%5C%22%3A%5C%22%241%5C%22%2C%5C%22versionExtractionRegEx%5C%22%3A%5C%22v(.%2B)%5C%22%7D%22%7D"
 
-            applicationId "com.limelight"
+            applicationId "com.yugi.pc"
             dimension "root"
             buildConfigField "boolean", "ROOT_BUILD", "false"
         }
@@ -93,12 +98,25 @@ android {
         }
     }
 
+    signingConfigs {
+        yugipc {
+            def ks = System.getenv('YUGIPC_KEYSTORE')
+            if (ks != null) {
+                storeFile file(ks)
+                storePassword System.getenv('YUGIPC_KEYSTORE_PASSWORD')
+                keyAlias 'yugipc'
+                keyPassword System.getenv('YUGIPC_KEYSTORE_PASSWORD')
+                storeType 'pkcs12'
+            }
+        }
+    }
+
     buildTypes {
         debug {
-            applicationIdSuffix ".noirdebug"
-            resValue "string", "app_label", "Artemis-mic"
-            resValue "string", "app_label_root", "Artemis-mic (Root)"
-            resValue "string", "app_label_game", "Artemis-mic"
+            applicationIdSuffix ".debug"
+            resValue "string", "app_label", "YugiPC"
+            resValue "string", "app_label_root", "YugiPC"
+            resValue "string", "app_label_game", "YugiPC"
 
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
@@ -134,10 +152,12 @@ android {
             // is to please change the applicationId before you publish.
             //
             // TL;DR: Leave the following line alone!
-            applicationIdSuffix ".noir"
-            resValue "string", "app_label", "Artemis-mic"
-            resValue "string", "app_label_root", "Artemis-mic (Root)"
-            resValue "string", "app_label_game", "Artemis-mic"
+            resValue "string", "app_label", "YugiPC"
+            resValue "string", "app_label_root", "YugiPC"
+            resValue "string", "app_label_game", "YugiPC"
+            if (System.getenv('YUGIPC_KEYSTORE') != null) {
+                signingConfig signingConfigs.yugipc
+            }
 
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
@@ -154,7 +174,7 @@ android {
         abi {
             enable true
             reset()
-            include "x86", "x86_64", "armeabi-v7a", "arm64-v8a"
+            include "arm64-v8a"
         }
     }
 

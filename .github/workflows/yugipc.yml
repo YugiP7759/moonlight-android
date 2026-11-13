@@ -1,0 +1,51 @@
+name: YugiPC APK
+
+on:
+  push:
+    branches: [yugipc]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Install NDK
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.0.12077973" > /dev/null
+
+      - name: Prepare signing
+        env:
+          KS_B64: ${{ secrets.YUGIPC_KEYSTORE_B64 }}
+        run: echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/yugipc.p12"
+
+      - name: Build release APK
+        env:
+          YUGIPC_KEYSTORE: ${{ runner.temp }}/yugipc.p12
+          YUGIPC_KEYSTORE_PASSWORD: ${{ secrets.YUGIPC_KEYSTORE_PASSWORD }}
+          SUNSHINE_USER: ${{ secrets.SUNSHINE_USER }}
+          SUNSHINE_PASS: ${{ secrets.SUNSHINE_PASS }}
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+        run: ./gradlew --no-daemon assembleNonRoot_gameRelease
+
+      - name: Collect APK
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/nonRoot_game/release/*arm64-v8a*.apk out/YugiPC.apk
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: YugiPC
+          path: out/YugiPC.apk
+          retention-days: 1

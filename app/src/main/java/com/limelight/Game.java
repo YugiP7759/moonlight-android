@@ -269,6 +269,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     public static final String EXTRA_VDISPLAY = "VirtualDisplay";
     public static final String EXTRA_SERVER_COMMANDS = "ServerCommands";
     public static final String EXTRA_DISPLAY_ID = "DisplayID";
+    // YugiPC: launched by YugiLauncher (no Moonlight dialogs; the launcher reconnects)
+    public static final String EXTRA_YUGI = "YugiPC";
 
     public static final String CLIPBOARD_IDENTIFIER = "ArtemisStreaming";
 
@@ -3659,8 +3661,14 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                                     MoonBridge.stringifyPortFlags(portFlags, "\n");
                         }
 
-                        Dialog.displayDialog(Game.this, getResources().getString(R.string.conn_terminated_title),
-                                message, true);
+                        if (getIntent().getBooleanExtra(EXTRA_YUGI, false)) {
+                            // YugiPC: go straight back to the launcher, which reconnects
+                            LimeLog.warning("YugiPC: stream dropped: " + message);
+                            finish();
+                        } else {
+                            Dialog.displayDialog(Game.this, getResources().getString(R.string.conn_terminated_title),
+                                    message, true);
+                        }
                     }
                     else {
                         finish();
