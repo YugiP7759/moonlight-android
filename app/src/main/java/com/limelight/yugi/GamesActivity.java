@@ -73,6 +73,8 @@ public class GamesActivity extends Activity {
     private boolean landscape;
     private String layoutKey;
     private int imeInset;
+    /** Page the WebView showed when the screen went to the background (blanked so Boosteroid's stream stops). */
+    private String stoppedUrl;
 
     private final Runnable statsTick = new Runnable() {
         @Override
@@ -490,9 +492,36 @@ public class GamesActivity extends Activity {
     // ---------------------------------------------------------------- lifecycle
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        // Back from the background: bring back the page that was blanked in onStop
+        if (stoppedUrl != null) {
+            String u = stoppedUrl;
+            stoppedUrl = null;
+            if ("about:blank".equals(web.getUrl()) && web.canGoBack()) web.goBack(); else web.loadUrl(u);
+        }
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        // Out of sight (the PC screen, home, screen off): nothing keeps streaming or polling behind it.
+        // REORDER_TO_FRONT keeps this activity alive, so Boosteroid's page is blanked rather than paused.
+        if (chat != null && chat.isOpen()) chat.setOpen(false);
+        if (web != null) {
+            String u = web.getUrl();
+            if (u != null && !u.startsWith("about:")) {
+                stoppedUrl = u;
+                web.loadUrl("about:blank");
+            }
+        }
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         web.onResume();
+        pad.setHostPaused(false);
         if (statsOn) { ui.removeCallbacks(statsTick); ui.post(statsTick); }
     }
 
@@ -500,6 +529,7 @@ public class GamesActivity extends Activity {
     protected void onPause() {
         super.onPause();
         web.onPause();
+        pad.setHostPaused(true);
         ui.removeCallbacks(statsTick);
         CookieManager.getInstance().flush();
     }

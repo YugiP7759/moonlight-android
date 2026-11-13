@@ -173,6 +173,8 @@ public class YugiLauncher extends Activity {
         ui.post(() -> {
             brand.setStatus(text);
             brand.setBusy(busy);
+            // keep the screen on only while connecting/streaming, never on an error that just sits there
+            if (busy) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         });
     }
 
@@ -190,6 +192,7 @@ public class YugiLauncher extends Activity {
         YugiTransition.snapshot = null;
         ui.post(this::removeFrozen);
         showStatus(text, false);
+        ui.post(() -> getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
     }
 
     // ---- first-run permissions ----

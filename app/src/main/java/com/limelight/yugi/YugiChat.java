@@ -160,6 +160,8 @@ public class YugiChat extends FrameLayout {
     private final LinearLayout chipRow;
     private org.json.JSONArray chipList;
     private final Runnable chipPoll = this::pollChips;
+    private int pollGen;    // bumps on every poll / stop; a stale /sessions answer is dropped
+    private boolean released;
     // Attachments waiting to be sent (shared: the file picker may outlive the hosting screen)
     private static final List<Attachment> pending = new ArrayList<>();
     /** Set by the file picker: reopen the panel on the next screen that attaches it. */
@@ -324,6 +326,7 @@ public class YugiChat extends FrameLayout {
         sessions = new YugiSessions(ctx, new YugiSessions.Host() {
             @Override public void onBack() { showSessions(false); }
             @Override public void onClose() { setOpen(false); }
+            @Override public void refreshList() { pollChips(); }
         });
         sessions.setVisibility(GONE);
         card.sessions = sessions;
@@ -665,13 +668,41 @@ public class YugiChat extends FrameLayout {
 
     // ---------------------------------------------------------------- session chips
 
+    /**
+     * The one /sessions poller: feeds the chips and the sessions list, and runs only while the chat is open
+     * on a screen that is showing (every 3 s while the list is up, 4 s for the chips alone, slower offline).
+     */
     private void pollChips() {
         removeCallbacks(chipPoll);
-        if (!open) return;
+        final int gen = ++pollGen;
+        if (!pollWanted()) return;
         YugiSessions.fetchList(list -> {
+            if (gen != pollGen) return; // superseded, closed or released meanwhile
             if (list != null) { chipList = list; renderChips(); }
-            if (open) postDelayed(chipPoll, 4000);
+            sessions.onListResult(list);
+            if (!pollWanted()) return;
+            long ms = sessions.wantsList() ? YugiSessions.LIST_POLL_MS : 4000;
+            postDelayed(chipPoll, list == null ? ms * 2 : ms);
         });
+    }
+
+    private boolean pollWanted() {
+        return open && !released && !YugiSessions.offline && getWindowVisibility() == VISIBLE;
+    }
+
+    /** Screen went to the background / came back: stop or resume the poll and the live session stream. */
+    @Override
+    protected void onWindowVisibilityChanged(int visibility) {
+        super.onWindowVisibilityChanged(visibility);
+        if (released || !open) return;
+        if (visibility == VISIBLE) {
+            if (sessionsWanted) sessions.setShown(true);
+            pollChips();
+        } else {
+            pollGen++;
+            removeCallbacks(chipPoll);
+            sessions.setShown(false);
+        }
     }
 
     /** Chip order: Yugi first, then the server's sessions. Null id = Yugi's own conversation. */
@@ -820,6 +851,7 @@ public class YugiChat extends FrameLayout {
             stopListening();
             if (tts != null) tts.stop();
             removeCallbacks(chipPoll);
+            pollGen++;
             YugiSpring.to(card, androidx.dynamicanimation.animation.DynamicAnimation.ALPHA, 0f);
             YugiSpring.to(card, androidx.dynamicanimation.animation.DynamicAnimation.TRANSLATION_X,
                     dp(12) * (getLayoutDirection() == LAYOUT_DIRECTION_RTL ? -1 : 1));
@@ -1481,6 +1513,12 @@ public class YugiChat extends FrameLayout {
 
     /** Call from the activity's onDestroy. */
     public void release() {
+        if (open) setOpen(false);
+        released = true;
+        pollGen++;
+        removeCallbacks(chipPoll);
+        sessions.setShown(false);
+        sessions.release(); // streamGen++ and cancel: the session's SSE reader stops too
         if (current == this) current = null;
         if (fieldKb != null) fieldKb.release();
         stopListening();

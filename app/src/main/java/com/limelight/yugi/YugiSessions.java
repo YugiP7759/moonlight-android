@@ -64,11 +64,13 @@ public class YugiSessions extends FrameLayout {
         void onBack();
         /** Close the whole chat card. */
         void onClose();
+        /** Fetch /sessions now; the chat's single poller hands the result back through {@link #onListResult}. */
+        default void refreshList() {}
     }
 
     static final int GREEN = 0xFF30D158;  // iOS system green (dark)
     static final int ORANGE = 0xFFFF9F0A; // iOS system orange (dark)
-    private static final long LIST_POLL_MS = 3000;
+    static final long LIST_POLL_MS = 3000;
 
     private static final OkHttpClient http = new OkHttpClient.Builder()
             .connectTimeout(8, TimeUnit.SECONDS)
@@ -365,7 +367,6 @@ public class YugiSessions extends FrameLayout {
         } else {
             streamGen++;
             cancelStream();
-            ui.removeCallbacks(pollTask);
             hideKeyboard();
         }
     }
@@ -379,8 +380,6 @@ public class YugiSessions extends FrameLayout {
     }
 
     // ---------------------------------------------------------------- list
-
-    private final Runnable pollTask = this::pollList;
 
     private static String base() { return "http://" + YugiConfig.host + ":" + YugiChat.PORT; }
 
@@ -409,29 +408,31 @@ public class YugiSessions extends FrameLayout {
     /** Id of the session open in the detail page, or null. */
     String currentId() { return inDetail ? currentId : null; }
 
+    /** The list comes from the chat's single /sessions poller (one request feeds the chips and this page). */
     private void pollList() {
-        ui.removeCallbacks(pollTask);
         if (!shown || inDetail || offline) return;
-        http.newCall(req("/sessions").get().build()).enqueue(new okhttp3.Callback() {
-            @Override public void onFailure(Call call, java.io.IOException e) {
-                ui.post(() -> {
-                    if (cards.getChildCount() <= 1) renderEmpty("אין חיבור לשרת");
-                    listStatus.setText("אין חיבור לשרת");
-                    if (shown && !inDetail) ui.postDelayed(pollTask, LIST_POLL_MS * 2);
-                });
-            }
-            @Override public void onResponse(Call call, Response r) {
-                JSONArray arr = null;
-                try (Response res = r) {
-                    if (res.isSuccessful() && res.body() != null) arr = new JSONObject(res.body().string()).optJSONArray("sessions");
-                } catch (Exception ignored) {}
-                final JSONArray list = arr;
-                ui.post(() -> {
-                    if (list != null) renderList(list);
-                    if (shown && !inDetail) ui.postDelayed(pollTask, LIST_POLL_MS);
-                });
-            }
-        });
+        host.refreshList();
+    }
+
+    /** A /sessions result from the chat's poller (null: the server didn't answer). */
+    void onListResult(JSONArray list) {
+        if (!shown || inDetail) return;
+        if (list != null) { renderList(list); return; }
+        if (cards.getChildCount() <= 1) renderEmpty("אין חיבור לשרת");
+        listStatus.setText("אין חיבור לשרת");
+    }
+
+    /** Whether the list page is what's showing (the chat polls faster for it). */
+    boolean wantsList() { return shown && !inDetail; }
+
+    boolean isShownForTest() { return shown; }
+
+    /** The hosting screen is going away: stop the stream and every pending callback. */
+    void release() {
+        shown = false;
+        streamGen++;
+        cancelStream();
+        ui.removeCallbacksAndMessages(null);
     }
 
     private void renderEmpty(String msg) {
@@ -541,7 +542,6 @@ public class YugiSessions extends FrameLayout {
         currentSession = s;
         currentId = s.optString("id");
         inDetail = true;
-        ui.removeCallbacks(pollTask);
         msgList.removeAllViews();
         seenIds.clear();
         pendingBubbles.clear();

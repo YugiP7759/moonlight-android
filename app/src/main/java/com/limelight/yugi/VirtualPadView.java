@@ -82,6 +82,8 @@ public class VirtualPadView extends View implements SensorEventListener {
     // gyro
     private float gyroX, gyroY;
     private SensorManager sensors;
+    private boolean hostPaused;
+    private boolean gyroListening;
     private boolean ticking;
 
     private boolean editing;
@@ -219,17 +221,27 @@ public class VirtualPadView extends View implements SensorEventListener {
     }
 
     private void updateGyro() {
-        boolean want = settings.gyro && padEnabled && !editing && isAttachedToWindow();
+        boolean want = settings.gyro && padEnabled && !editing && !hostPaused && isAttachedToWindow();
         if (sensors == null) sensors = (SensorManager) getContext().getSystemService(Context.SENSOR_SERVICE);
         if (sensors == null) return;
         sensors.unregisterListener(this);
+        gyroListening = false;
         gyroX = gyroY = 0;
         if (want) {
             Sensor g = sensors.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
-            if (g != null) sensors.registerListener(this, g, SensorManager.SENSOR_DELAY_GAME);
+            if (g != null) gyroListening = sensors.registerListener(this, g, SensorManager.SENSOR_DELAY_GAME);
             startTicking();
         }
     }
+
+    /** The hosting activity's onPause / onResume: the gyroscope is off while the screen isn't in front. */
+    public void setHostPaused(boolean paused) {
+        if (paused == hostPaused) return;
+        hostPaused = paused;
+        updateGyro();
+    }
+
+    boolean isGyroListening() { return gyroListening; }
 
     @Override
     public void onSensorChanged(SensorEvent e) {
@@ -255,6 +267,7 @@ public class VirtualPadView extends View implements SensorEventListener {
     @Override
     protected void onDetachedFromWindow() {
         if (sensors != null) sensors.unregisterListener(this);
+        gyroListening = false;
         ticking = false;
         super.onDetachedFromWindow();
     }
@@ -270,7 +283,7 @@ public class VirtualPadView extends View implements SensorEventListener {
                 lookY = PadMath.decay(lookY, settings.lookDecay);
             }
             recompute();
-            boolean keep = lookX != 0 || lookY != 0 || lookPointer != -1 || (settings.gyro && padEnabled);
+            boolean keep = lookX != 0 || lookY != 0 || lookPointer != -1 || gyroListening;
             if (keep) Choreographer.getInstance().postFrameCallback(this);
             else ticking = false;
         }
