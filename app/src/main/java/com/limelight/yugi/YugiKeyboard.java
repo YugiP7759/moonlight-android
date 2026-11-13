@@ -86,6 +86,12 @@ public class YugiKeyboard extends View {
     private final TextPaint previewPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final Path micPath = new Path();
 
+    // emoji picker (created on first use); in search mode the keys type into its query
+    private YugiEmojiPanel emojiPanel;
+    private boolean emojiMode, searchMode, searchGesture;
+    private final StringBuilder query = new StringBuilder();
+    private final Path emojiGlyph = new Path();
+
     // floating drag
     private int dragPointer = -1;
     private float dragDX, dragDY;
@@ -168,7 +174,7 @@ public class YugiKeyboard extends View {
 
     /** Height of the visible keyboard panel (without the transparent headroom). */
     public float panelHeight() {
-        float h = padTop + padBottom + handleH;
+        float h = padTop + padBottom + handleH + searchExtra();
         for (int i = 0; i < layout.rows; i++) h += rowH * layout.rowHeights[i] + (i > 0 ? gap : 0);
         return h;
     }
@@ -177,6 +183,9 @@ public class YugiKeyboard extends View {
     public float pushHeight() { return mode == YugiKbdSettings.FLOATING ? 0f : panelHeight(); }
 
     public float headroom() { return headroom; }
+
+    /** Search mode: the field and the results strip above the keys. */
+    private float searchExtra() { return searchMode && emojiPanel != null ? emojiPanel.searchBarHeight(rowH) : 0f; }
     public int effectiveMode() { return mode; }
     /** Panel rect in view pixels: {left, top, right, bottom}. */
     public float[] panelBounds() { return new float[]{panelL, panelT, panelR, panelB}; }
@@ -286,7 +295,11 @@ public class YugiKeyboard extends View {
         float keysW = keysR - keysL;
         float unit = (keysW + gap) / layout.widthUnits;
         float[] rowTop = new float[layout.rows];
-        float y = panelT + handleH + padTop;
+        float y = panelT + handleH + searchExtra() + padTop;
+        if (emojiPanel != null) {
+            emojiPanel.setBounds(emojiL(), panelT + handleH, emojiR(), panelB, rowH);
+            emojiPanel.setSearchBounds(emojiL(), panelT + handleH, emojiR(), panelT + handleH + searchExtra());
+        }
         for (int i = 0; i < layout.rows; i++) {
             rowTop[i] = y;
             y += rowH * layout.rowHeights[i] + gap;
@@ -357,6 +370,10 @@ public class YugiKeyboard extends View {
 
     private float width(String s) { return s == null ? 0 : textPaint.measureText(s); }
 
+    /** Horizontal extent of the emoji picker: the panel, or the keys' side in one-handed mode. */
+    private float emojiL() { return hand != YugiKbdSettings.HAND_NONE ? keysL - padX : panelL; }
+    private float emojiR() { return hand != YugiKbdSettings.HAND_NONE ? keysR + padX : panelR; }
+
     /** Key bounds, for tests: {left, top, right, bottom}. */
     public float[] keyBounds(int i) { return new float[]{kl[i], kt[i], kr[i], kb[i]}; }
     public int keyCount() { return layout.keys.size(); }
@@ -392,6 +409,15 @@ public class YugiKeyboard extends View {
             if (stripL >= 0) drawStripChevron(c);
         }
 
+        if (emojiMode && !searchMode && emojiPanel != null) {
+            emojiPanel.draw(c);
+            return;
+        }
+        if (searchMode && emojiPanel != null) {
+            float st = panelT + handleH;
+            emojiPanel.drawSearch(c, emojiL(), st, emojiR(), st + searchExtra());
+        }
+
         boolean heb = engine.hebrew, shift = engine.shift(), caps = engine.caps(), fn = engine.fn();
         long now = SystemClock.uptimeMillis();
         boolean animating = false;
@@ -414,6 +440,10 @@ public class YugiKeyboard extends View {
 
             if (k.kind == YugiKeyLayout.ACTION && k.code == YugiKeyLayout.A_MIC) {
                 if (drawMicKey(c, i, now)) animating = true;
+                continue;
+            }
+            if (k.kind == YugiKeyLayout.ACTION && k.code == YugiKeyLayout.A_EMOJI) {
+                drawEmojiKey(c, i);
                 continue;
             }
             String label = YugiKeyLayout.label(k, heb, shift, caps, fn);
@@ -545,6 +575,28 @@ public class YugiKeyboard extends View {
         p.setStyle(old);
     }
 
+    /** Emoji key: a line-drawn smiley (in search mode it leads back to the picker). */
+    private void drawEmojiKey(Canvas c, int i) {
+        float cx = (kl[i] + kr[i]) * 0.5f, cy = (kt[i] + kb[i]) * 0.5f;
+        float s = Math.min(kr[i] - kl[i], kb[i] - kt[i]) * 0.5f * Math.min(1.15f, set.font);
+        float rad = s * 0.42f;
+        textPaint.setColor(searchMode ? YugiTheme.ACCENT : YugiTheme.TEXT_DIM);
+        Paint.Style old = textPaint.getStyle();
+        textPaint.setStyle(Paint.Style.STROKE);
+        textPaint.setStrokeWidth(Math.max(1.4f * dp, s * 0.075f));
+        textPaint.setStrokeCap(Paint.Cap.ROUND);
+        c.drawCircle(cx, cy, rad, textPaint);
+        r.set(cx - rad * 0.55f, cy - rad * 0.5f, cx + rad * 0.55f, cy + rad * 0.55f);
+        emojiGlyph.rewind();
+        emojiGlyph.addArc(r, 25, 130);
+        c.drawPath(emojiGlyph, textPaint);
+        textPaint.setStyle(Paint.Style.FILL);
+        float eye = Math.max(1.2f * dp, s * 0.06f);
+        c.drawCircle(cx - rad * 0.36f, cy - rad * 0.28f, eye, textPaint);
+        c.drawCircle(cx + rad * 0.36f, cy - rad * 0.28f, eye, textPaint);
+        textPaint.setStyle(old);
+    }
+
     private void drawPreview(Canvas c) {
         float h = rowH * 0.9f, pad = 12 * dp;
         float tw = previewPaint.measureText(voicePreview);
@@ -608,6 +660,7 @@ public class YugiKeyboard extends View {
         if (!inPanel(x, y)) return -1;
         if (stripL >= 0 && x >= stripL && x <= stripR) return -1;
         if (handleH > 0 && y < panelT + handleH) return -1;
+        if (searchMode && y < panelT + handleH + searchExtra()) return -1; // the search field is not a key
         int n = layout.keys.size();
         int best = -1;
         float bestD = Float.MAX_VALUE;
@@ -627,6 +680,21 @@ public class YugiKeyboard extends View {
         int action = e.getActionMasked();
         int idx = e.getActionIndex();
         int id = e.getPointerId(idx);
+        if (emojiPanel != null && (emojiMode || searchMode) && dragPointer < 0) {
+            float x0 = e.getX(), y0 = e.getY();
+            if (action == MotionEvent.ACTION_DOWN) {
+                if (!inPanel(x0, y0)) return false;
+                boolean handle = handleH > 0 && y0 < panelT + handleH;
+                float sTop = panelT + handleH;
+                searchGesture = !handle && (!searchMode || (y0 < sTop + searchExtra() && x0 >= emojiL() && x0 <= emojiR()));
+                if (searchGesture && stripL >= 0 && x0 >= stripL && x0 <= stripR) searchGesture = false;
+            }
+            if (searchGesture) {
+                if (searchMode) emojiPanel.onSearchTouch(e); else emojiPanel.onTouch(e);
+                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) searchGesture = false;
+                return true;
+            }
+        }
         switch (action) {
             case MotionEvent.ACTION_DOWN:
                 if (!inPanel(e.getX(), e.getY())) return false; // the desktop around stays touchable
@@ -680,7 +748,7 @@ public class YugiKeyboard extends View {
         // rolling typing: a new finger commits the character still under an earlier finger
         for (int p = 0; p < MAXP; p++) {
             if (p != id && pKey[p] >= 0 && !pCommitted[p] && layout.keys.get(pKey[p]).kind == YugiKeyLayout.CHAR && p != altPointer) {
-                engine.charKey(layout.keys.get(pKey[p]), null);
+                typeChar(layout.keys.get(pKey[p]), null);
                 pCommitted[p] = true;
             }
         }
@@ -705,7 +773,7 @@ public class YugiKeyboard extends View {
                 }
                 break;
             case YugiKeyLayout.SPECIAL:
-                pMods[id] = engine.specialKey(k);
+                pMods[id] = searchMode ? searchSpecial(k) : engine.specialKey(k);
                 pCommitted[id] = true;
                 if (k.repeat) {
                     repeatPointer = id;
@@ -719,6 +787,8 @@ public class YugiKeyboard extends View {
                 if (k.code == YugiKeyLayout.A_LANG) {
                     longPressPointer = id;
                     postDelayed(longPress, LONG_PRESS_MS);
+                } else if (k.code == YugiKeyLayout.A_EMOJI) {
+                    YugiEmojiData.prefetch(getContext()); // usually loaded by the time the finger lifts
                 }
                 break;
             default:
@@ -796,7 +866,7 @@ public class YugiKeyboard extends View {
             case YugiKeyLayout.CHAR:
                 if (!cancel && !pCommitted[id]) {
                     String alt = (id == altPointer && altSel >= 0) ? alts[altSel] : null;
-                    engine.charKey(k, alt);
+                    typeChar(k, alt);
                 }
                 break;
             case YugiKeyLayout.MOD:
@@ -806,7 +876,8 @@ public class YugiKeyboard extends View {
                 if (!cancel && !pCommitted[id]) {
                     if (k.code == YugiKeyLayout.A_LANG) engine.toggleLanguage();
                     else if (k.code == YugiKeyLayout.A_HIDE) host.onHideRequested();
-                    else if (k.code == YugiKeyLayout.A_MIC) host.onMicRequested(engine.hebrew);
+                    else if (k.code == YugiKeyLayout.A_MIC) { if (!searchMode) host.onMicRequested(engine.hebrew); }
+                    else if (k.code == YugiKeyLayout.A_EMOJI) { if (searchMode) closeSearch(); else openEmoji(); }
                 }
                 break;
             default:
@@ -855,7 +926,8 @@ public class YugiKeyboard extends View {
     private void onRepeat() {
         int id = repeatPointer;
         if (id < 0 || pKey[id] < 0) return;
-        engine.repeat(layout.keys.get(pKey[id]), pMods[id]);
+        if (searchMode) searchSpecial(layout.keys.get(pKey[id]));
+        else engine.repeat(layout.keys.get(pKey[id]), pMods[id]);
         postDelayed(repeatTick, REPEAT_RATE_MS);
     }
 
@@ -875,8 +947,136 @@ public class YugiKeyboard extends View {
         dragPointer = -1;
         alts = null;
         engine.reset();
+        if (emojiPanel != null) emojiPanel.cancelTouch();
+        searchGesture = false;
         invalidate();
     }
+
+    // ------------------------------------------------------------------ emoji picker
+
+    private YugiEmojiPanel panel() {
+        if (emojiPanel == null) {
+            emojiPanel = new YugiEmojiPanel(this, new YugiEmojiPanel.Out() {
+                @Override public void emoji(String s) { engine.emoji(s); }
+                @Override public void backspace() { engine.backspace(); }
+                @Override public void abc() { closeEmoji(); }
+                @Override public void openSearch() { YugiKeyboard.this.openSearch(); }
+                @Override public void closeSearch() { YugiKeyboard.this.closeSearch(); }
+                @Override public void clearQuery() { query.setLength(0); emojiPanel.setQuery(""); }
+                @Override public void feedback(int haptic) {
+                    if (set.haptics) performHapticFeedback(haptic);
+                    if (set.sound && audio != null && haptic == HapticFeedbackConstants.VIRTUAL_KEY) {
+                        audio.playSoundEffect(AudioManager.FX_KEYPRESS_STANDARD, -1);
+                    }
+                }
+            });
+            if (getWidth() > 0) emojiPanel.setBounds(emojiL(), panelT + handleH, emojiR(), panelB, rowH);
+        }
+        return emojiPanel;
+    }
+
+    public boolean isEmojiOpen() { return emojiMode; }
+    public boolean isEmojiSearch() { return searchMode; }
+
+    /** Emoji key: the picker takes the keys' place, at the same height, with a spring. */
+    public void openEmoji() {
+        YugiEmojiPanel p = panel();
+        clearKeys();
+        boolean wasSearch = searchMode;
+        emojiMode = true;
+        searchMode = false;
+        p.setBounds(emojiL(), panelT + handleH, emojiR(), panelB, rowH);
+        p.open();
+        if (wasSearch) geometryChanged();
+        invalidate();
+    }
+
+    /** ABC: back to the keys. */
+    public void closeEmoji() {
+        boolean wasSearch = searchMode;
+        emojiMode = false;
+        searchMode = false;
+        query.setLength(0);
+        if (emojiPanel != null) emojiPanel.cancelTouch();
+        clearKeys();
+        if (wasSearch) geometryChanged();
+        invalidate();
+    }
+
+    /** The search field: the keys come back (taller panel) and type into the query. */
+    void openSearch() {
+        clearKeys();
+        searchMode = true;
+        query.setLength(0);
+        panel().setQuery("");
+        emojiPanel.openSearch();
+        geometryChanged();
+    }
+
+    void closeSearch() {
+        clearKeys();
+        searchMode = false;
+        query.setLength(0);
+        if (emojiPanel != null) { emojiPanel.setQuery(""); emojiPanel.backToGrid(); }
+        geometryChanged();
+    }
+
+    private void geometryChanged() {
+        requestLayout();
+        if (getWidth() > 0) layoutKeys(getWidth());
+        invalidate();
+        host.onGeometryChanged();
+    }
+
+    /** A character key: into the search query in search mode, otherwise out through the engine. */
+    private void typeChar(YugiKeyLayout.Key k, String alt) {
+        if (!searchMode) { engine.charKey(k, alt); return; }
+        String s = alt != null ? alt : YugiKeyLayout.output(k, engine.hebrew, engine.shift(), engine.caps());
+        engine.consume();
+        if (s == null || s.isEmpty()) return;
+        query.append(s);
+        panel().setQuery(query.toString());
+    }
+
+    /** Special keys in search mode: Backspace edits the query, Enter and Esc go back to the picker. */
+    private int searchSpecial(YugiKeyLayout.Key k) {
+        if (k.code == android.view.KeyEvent.KEYCODE_DEL) {
+            if (query.length() > 0) {
+                query.setLength(query.length() - Character.charCount(query.codePointBefore(query.length())));
+                panel().setQuery(query.toString());
+            }
+        } else if (k.code == android.view.KeyEvent.KEYCODE_ENTER || k.code == android.view.KeyEvent.KEYCODE_ESCAPE) {
+            post(this::closeSearch);
+        }
+        engine.consume();
+        return 0;
+    }
+
+    /** Drops held keys and their timers without touching the engine's modifiers. */
+    private void clearKeys() {
+        removeCallbacks(longPress);
+        removeCallbacks(repeatTick);
+        repeatPointer = longPressPointer = -1;
+        for (int p = 0; p < MAXP; p++) pKey[p] = -1;
+        for (int i = 0; i < pressT.length; i++) { pressT[i] = 0; holdCount[i] = 0; }
+        altPointer = bubblePointer = -1;
+        alts = null;
+    }
+
+    @Override
+    protected void onVisibilityChanged(View changed, int visibility) {
+        super.onVisibilityChanged(changed, visibility);
+        // the keyboard went down: it comes back with the keys, like Gboard
+        if (changed == this && visibility != VISIBLE && (emojiMode || searchMode)) {
+            emojiMode = false;
+            searchMode = false;
+            query.setLength(0);
+            if (emojiPanel != null) emojiPanel.cancelTouch();
+            requestLayout();
+        }
+    }
+
+    public YugiEmojiPanel emojiPanelForTest() { return emojiPanel; }
 
     // ---------------------------------------------------------------- test hooks
 

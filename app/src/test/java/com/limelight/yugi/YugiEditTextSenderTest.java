@@ -58,6 +58,24 @@ public class YugiEditTextSenderTest {
         assertEquals("יי", et.getText().toString());
     }
 
+    @Test public void backspaceDeletesAWholeEmoji() {
+        YugiEditTextSender s = sender();
+        String[] emoji = {"👍🏽", "👨‍👩‍👧", "🇮🇱", "#️⃣", "❤️", "😀"};
+        s.text("a");
+        for (String e : emoji) s.text(e);
+        for (int i = emoji.length - 1; i >= 0; i--) {
+            tap(s, KeyEvent.KEYCODE_DEL, 0);
+            StringBuilder want = new StringBuilder("a");
+            for (int j = 0; j < i; j++) want.append(emoji[j]);
+            assertEquals("after deleting " + emoji[i], want.toString(), et.getText().toString());
+        }
+        // forward delete too
+        s.text("🇮🇱👍🏽");
+        Selection.setSelection(et.getText(), 1);
+        tap(s, KeyEvent.KEYCODE_FORWARD_DEL, 0);
+        assertEquals("a👍🏽", et.getText().toString());
+    }
+
     @Test public void arrowsMoveAndShiftSelects() {
         YugiEditTextSender s = sender();
         s.text("hello");

@@ -16,7 +16,7 @@ import static com.limelight.yugi.YugiKeyLayout.M_WIN;
  *   <li>Shift, Ctrl and Alt are sticky: a tap arms them for the next key, a second tap clears them,
  *       a quick double tap on Shift is Caps Lock. Holding a modifier while tapping keys chords them.</li>
  *   <li>Win: a tap opens the start menu (Meta press), holding it chords (Win+E).</li>
- *   <li>Fn turns the number row into F1..F12 until tapped again.</li>
+ *   <li>Fn turns the number row into F1..F12 and Backspace into Del until tapped again.</li>
  * </ul>
  * Pure Java, unit tested in YugiKeyEngineTest. All calls happen on the UI thread, in order, so
  * a Backspace never overtakes the letter before it.
@@ -112,15 +112,34 @@ public final class YugiKeyEngine {
     /** Esc, Tab, Enter, Backspace, Del, arrows. Returns the modifiers used (kept for auto-repeat). */
     public int specialKey(YugiKeyLayout.Key k) {
         int mods = currentMods();
-        tap(k.code, mods);
+        tap(specialCode(k), mods);
         consumed();
         return mods;
     }
 
     /** Auto-repeat of a held special key, with the modifiers of its first press. */
     public void repeat(YugiKeyLayout.Key k, int mods) {
-        tap(k.code, mods);
+        tap(specialCode(k), mods);
     }
+
+    /** The code a special key sends now: with Fn locked, Backspace is Del (forward delete). */
+    public int specialCode(YugiKeyLayout.Key k) {
+        return fn() && k.fnCode != 0 ? k.fnCode : k.code;
+    }
+
+    /** An emoji from the picker: always text (an armed Ctrl must not turn it into a shortcut). */
+    public void emoji(String s) {
+        if (s != null && !s.isEmpty()) out.text(s);
+        consumed();
+    }
+
+    /** Backspace from the emoji picker (no modifiers). */
+    public void backspace() {
+        tap(android.view.KeyEvent.KEYCODE_DEL, 0);
+    }
+
+    /** One-shot modifiers used up by a key that typed into the keyboard itself (emoji search). */
+    public void consume() { consumed(); }
 
     public void toggleLanguage() { hebrew = !hebrew; }
 

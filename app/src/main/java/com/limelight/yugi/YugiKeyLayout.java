@@ -9,7 +9,8 @@ import java.util.Map;
 
 /**
  * Key model of the YugiPC keyboard, modeled on the Windows touch keyboard: English and Hebrew
- * (Israeli SI-1452 positions), a row of PC keys (Esc, Tab, Ctrl, Alt, Win, arrows, Del, Fn -> F1..F12),
+ * (Israeli SI-1452 positions), a row of PC keys (Esc, Tab, Ctrl, Alt, Win, arrows, Fn -> F1..F12, Fn + Backspace = Del),
+ * an emoji key that opens the emoji picker,
  * sticky modifiers and long-press alternates.
  * <p>
  * Two layouts: {@link #full()} (15 units wide, for screens >= 600dp) and {@link #compact()} (11 units,
@@ -30,7 +31,7 @@ public final class YugiKeyLayout {
     // keyboard-only "modifiers"
     public static final int M_FN = 0x100, M_CAPS = 0x200;
 
-    public static final int A_LANG = 1, A_HIDE = 2, A_MIC = 3;
+    public static final int A_LANG = 1, A_HIDE = 2, A_MIC = 3, A_EMOJI = 4;
 
     private static final String US_PLAIN = "`1234567890-=[]\\;',./";
     private static final String US_SHIFT = "~!@#$%^&*()_+{}|:\"<>?";
@@ -155,7 +156,7 @@ public final class YugiKeyLayout {
         l.action(r, "EN", A_LANG, 1.25f);
         l.action(r, "mic", A_MIC, 1f);
         l.chr(r, ' ', 3.25f);
-        l.special(r, "Del", KeyEvent.KEYCODE_FORWARD_DEL, 1f, true);
+        l.action(r, "emoji", A_EMOJI, 1f); // Del is Fn + Backspace
         l.special(r, "←", KeyEvent.KEYCODE_DPAD_LEFT, 1f, true);
         l.special(r, "↓", KeyEvent.KEYCODE_DPAD_DOWN, 1f, true);
         l.special(r, "→", KeyEvent.KEYCODE_DPAD_RIGHT, 1f, true);
@@ -177,7 +178,7 @@ public final class YugiKeyLayout {
         l.special(r, "↑", KeyEvent.KEYCODE_DPAD_UP, 1f, true);
         l.special(r, "↓", KeyEvent.KEYCODE_DPAD_DOWN, 1f, true);
         l.special(r, "→", KeyEvent.KEYCODE_DPAD_RIGHT, 1f, true);
-        l.special(r, "Del", KeyEvent.KEYCODE_FORWARD_DEL, 1f, true);
+        l.action(r, "emoji", A_EMOJI, 1f); // Del is Fn + Backspace
         r++;
         l.chars(r, "1234567890");
         l.special(r, "⌫", KeyEvent.KEYCODE_DEL, 1f, true);
@@ -223,6 +224,7 @@ public final class YugiKeyLayout {
         Key k = new Key(SPECIAL, (char) 0, code, units, label);
         k.row = row;
         k.repeat = repeat;
+        if (code == KeyEvent.KEYCODE_DEL) { k.fnCode = KeyEvent.KEYCODE_FORWARD_DEL; k.fnLabel = "Del"; } // Fn + Backspace = Del
         keys.add(k);
     }
 
@@ -286,6 +288,8 @@ public final class YugiKeyLayout {
             case ACTION:
                 if (k.code == A_LANG) return hebrew ? "עב" : "EN";
                 return k.label;
+            case SPECIAL:
+                return fn && k.fnLabel != null ? k.fnLabel : k.label;
             default:
                 return k.label;
         }

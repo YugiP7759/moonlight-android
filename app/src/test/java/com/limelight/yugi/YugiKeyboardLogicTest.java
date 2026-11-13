@@ -46,7 +46,7 @@ public class YugiKeyboardLogicTest {
 
     @Test public void pcKeysPresentInBothLayouts() {
         for (YugiKeyLayout l : new YugiKeyLayout[]{YugiKeyLayout.full(), YugiKeyLayout.compact()}) {
-            int[] codes = {KeyEvent.KEYCODE_ESCAPE, KeyEvent.KEYCODE_TAB, KeyEvent.KEYCODE_FORWARD_DEL,
+            int[] codes = {KeyEvent.KEYCODE_ESCAPE, KeyEvent.KEYCODE_TAB,
                     KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_UP,
                     KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DEL};
             for (int c : codes) special(l, c);
@@ -159,6 +159,52 @@ public class YugiKeyboardLogicTest {
         int f5 = KeyEvent.KEYCODE_F5, f12 = KeyEvent.KEYCODE_F12;
         assertEquals("D:" + f5 + "/0 U:" + f5 + "/0 D:" + f12 + "/0 U:" + f12 + "/0", r.all());
         assertEquals("F5", YugiKeyLayout.label(key(l, '5'), false, false, false, true));
+    }
+
+    @Test public void emojiKeyTakesDelsPlace() {
+        for (YugiKeyLayout l : new YugiKeyLayout[]{YugiKeyLayout.full(), YugiKeyLayout.compact()}) {
+            int emoji = 0;
+            for (YugiKeyLayout.Key k : l.keys) {
+                if (k.kind == YugiKeyLayout.ACTION && k.code == YugiKeyLayout.A_EMOJI) emoji++;
+                assertFalse("no Del key (it is Fn + Backspace)", k.kind == YugiKeyLayout.SPECIAL && k.code == KeyEvent.KEYCODE_FORWARD_DEL);
+            }
+            assertEquals(1, emoji);
+        }
+    }
+
+    @Test public void fnBackspaceIsDelete() {
+        Rec r = new Rec();
+        YugiKeyEngine e = new YugiKeyEngine(r);
+        YugiKeyLayout l = YugiKeyLayout.full();
+        YugiKeyLayout.Key bs = special(l, KeyEvent.KEYCODE_DEL);
+        int del = KeyEvent.KEYCODE_DEL, fwd = KeyEvent.KEYCODE_FORWARD_DEL;
+        e.specialKey(bs);
+        assertEquals("D:" + del + "/0 U:" + del + "/0", r.all());
+        assertEquals("⌫", YugiKeyLayout.label(bs, false, false, false, false));
+        e.modDown(YugiKeyLayout.M_FN); e.modUp(YugiKeyLayout.M_FN, 0);
+        r.log.clear();
+        int mods = e.specialKey(bs);
+        e.repeat(bs, mods); // held: auto-repeat deletes forward too
+        assertEquals("D:" + fwd + "/0 U:" + fwd + "/0 D:" + fwd + "/0 U:" + fwd + "/0", r.all());
+        assertEquals("Del", YugiKeyLayout.label(bs, false, false, false, true));
+        assertEquals("Del", YugiKeyLayout.label(special(YugiKeyLayout.compact(), KeyEvent.KEYCODE_DEL), true, false, false, true));
+        // Fn off again: Backspace
+        e.modDown(YugiKeyLayout.M_FN); e.modUp(YugiKeyLayout.M_FN, 0);
+        r.log.clear();
+        e.specialKey(bs);
+        assertEquals("D:" + del + "/0 U:" + del + "/0", r.all());
+    }
+
+    @Test public void emojiIsTextEvenWithCtrlArmed() {
+        Rec r = new Rec();
+        YugiKeyEngine e = new YugiKeyEngine(r);
+        e.modDown(YugiKeyLayout.M_CTRL); e.modUp(YugiKeyLayout.M_CTRL, 0);
+        e.emoji("👨‍👩‍👧");
+        assertEquals("T:👨‍👩‍👧", r.all());
+        assertFalse("the one-shot Ctrl is used up", e.isActive(YugiKeyLayout.M_CTRL));
+        r.log.clear();
+        e.backspace();
+        assertEquals("D:" + KeyEvent.KEYCODE_DEL + "/0 U:" + KeyEvent.KEYCODE_DEL + "/0", r.all());
     }
 
     @Test public void longPressAlternates() {

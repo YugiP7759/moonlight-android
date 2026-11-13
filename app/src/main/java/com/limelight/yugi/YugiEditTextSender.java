@@ -141,10 +141,51 @@ public final class YugiEditTextSender implements YugiKeyEngine.Sender {
         }
         if (forward) {
             if (st >= e.length()) return;
-            e.delete(st, Character.offsetByCodePoints(e, st, 1));
+            e.delete(st, graphemeAfter(e, st));
         } else {
             if (st == 0) return;
-            e.delete(Character.offsetByCodePoints(e, st, -1), st);
+            e.delete(graphemeBefore(e, st), st);
+        }
+    }
+
+    /**
+     * Start of the character before {@code at} as the user sees it: a whole emoji (👍🏽, 👨‍👩‍👧, 🇮🇱, #️⃣),
+     * not one code point of it. Falls back to one code point.
+     */
+    static int graphemeBefore(CharSequence s, int at) {
+        int cp = Character.offsetByCodePoints(s, at, -1);
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 24) {
+                android.icu.text.BreakIterator it = android.icu.text.BreakIterator.getCharacterInstance();
+                it.setText(s.toString());
+                int p = it.preceding(at);
+                return p >= 0 && p < at ? p : cp;
+            }
+            java.text.BreakIterator it = java.text.BreakIterator.getCharacterInstance();
+            it.setText(s.toString());
+            int p = it.preceding(at);
+            return p >= 0 && p < at ? Math.min(p, cp) : cp;
+        } catch (RuntimeException ex) {
+            return cp;
+        }
+    }
+
+    /** End of the character after {@code at} (see {@link #graphemeBefore}). */
+    static int graphemeAfter(CharSequence s, int at) {
+        int cp = Character.offsetByCodePoints(s, at, 1);
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 24) {
+                android.icu.text.BreakIterator it = android.icu.text.BreakIterator.getCharacterInstance();
+                it.setText(s.toString());
+                int f = it.following(at);
+                return f > at && f <= s.length() ? f : cp;
+            }
+            java.text.BreakIterator it = java.text.BreakIterator.getCharacterInstance();
+            it.setText(s.toString());
+            int f = it.following(at);
+            return f > at && f <= s.length() ? Math.max(f, cp) : cp;
+        } catch (RuntimeException ex) {
+            return cp;
         }
     }
 
