@@ -60,6 +60,11 @@ public class YugiLauncher extends Activity {
     private boolean working;
     private boolean launchedGame;
     private Runnable pendingAutoRetry;
+    private android.widget.ImageView frozen;
+    private boolean resizeLaunch;
+    private boolean askingPermissions;
+    private static final String KEY_PERMS_ASKED = "perms_asked";
+    private static final int REQ_PERMS = 7001;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -71,6 +76,23 @@ public class YugiLauncher extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (askingPermissions) return;
+        if (!getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_PERMS_ASKED, false)) {
+            askPermissions();
+            return;
+        }
+        if (YugiTransition.pendingResize) {
+            // Rotation / fold: keep the last frame on screen, blurred, and re-stream right away.
+            YugiTransition.pendingResize = false;
+            launchedGame = false;
+            removeFrozen();
+            frozen = YugiTransition.addFrozenFrame(this, false);
+            int d = YugiTransition.rotationDelta;
+            YugiTransition.animateIn(frozen, d == 1 ? 90f : d == 3 ? -90f : d == 2 ? 180f : 0f);
+            resizeLaunch = true;
+            connect();
+            return;
+        }
         if (launchedGame) {
             // Back from the stream (closed or dropped): reconnect shortly, never show a PC list.
             launchedGame = false;
@@ -155,9 +177,55 @@ public class YugiLauncher extends Activity {
         });
     }
 
+    private void removeFrozen() {
+        if (frozen != null) {
+            android.view.ViewGroup p = (android.view.ViewGroup) frozen.getParent();
+            if (p != null) p.removeView(frozen);
+            frozen = null;
+        }
+    }
+
     private void showError(String text) {
         working = false;
+        resizeLaunch = false;
+        YugiTransition.snapshot = null;
+        ui.post(this::removeFrozen);
         showStatus(text, false);
+    }
+
+    // ---- first-run permissions ----
+
+    private void askPermissions() {
+        askingPermissions = true;
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("הרשאות")
+                .setMessage("YugiPC צריך גישה למיקרופון ולמצלמה כדי להעביר אותם למחשב בזמן החיבור. "
+                        + "אפשר להשתיק או לכבות אותם בכל רגע מהכפתורים הקטנים במסך.")
+                .setCancelable(false)
+                .setPositiveButton("אישור", (d, w) -> {
+                    List<String> perms = new ArrayList<>();
+                    perms.add(android.Manifest.permission.RECORD_AUDIO);
+                    perms.add(android.Manifest.permission.CAMERA);
+                    if (Build.VERSION.SDK_INT >= 33) perms.add("android.permission.POST_NOTIFICATIONS");
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        requestPermissions(perms.toArray(new String[0]), REQ_PERMS);
+                    } else {
+                        onPermissionsDone();
+                    }
+                })
+                .show();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQ_PERMS) onPermissionsDone();
+    }
+
+    private void onPermissionsDone() {
+        askingPermissions = false;
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_PERMS_ASKED, true).apply();
+        connect();
     }
 
     // ---- connection flow ----
@@ -240,8 +308,17 @@ public class YugiLauncher extends Activity {
             ui.post(() -> {
                 working = false;
                 launchedGame = true;
+                boolean seamless = resizeLaunch;
+                resizeLaunch = false;
+                if (seamless) intent.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION);
                 startActivity(intent);
-                overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
+                if (seamless) {
+                    overridePendingTransition(0, 0);
+                } else {
+                    overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
+                }
+                // The Game activity shows its own copy of the frozen frame; drop ours once it is covered.
+                ui.postDelayed(this::removeFrozen, 600);
             });
         } catch (Exception e) {
             LimeLog.warning("YugiPC: connect failed: " + e);
@@ -313,7 +390,8 @@ public class YugiLauncher extends Activity {
         StreamSize s = new StreamSize();
         s.width = YugiConfig.even(Math.round(w * YugiConfig.RES_SCALE));
         s.height = YugiConfig.even(Math.round(h * YugiConfig.RES_SCALE));
-        s.fps = maxRefreshRate() >= YugiConfig.FPS_PREFERRED - 1 ? YugiConfig.FPS_PREFERRED : YugiConfig.FPS_FALLBACK;
+        s.fps = (!YugiFps.fallback && maxRefreshRate() >= YugiConfig.FPS_PREFERRED - 1)
+                ? YugiConfig.FPS_PREFERRED : YugiConfig.FPS_FALLBACK;
         return s;
     }
 

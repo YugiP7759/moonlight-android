@@ -1876,6 +1876,7 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
                     sb.append(context.getString(R.string.perf_overlay_dectime, decodeTimeMs));
                 }
                 String fullLog = sb.toString();
+                com.limelight.yugi.YugiFps.report(fps.receivedFps, prefs.fps);
                 if(prefs.enablePerfOverlay) {
                     perfListener.onPerfUpdate(fullLog);
                 }

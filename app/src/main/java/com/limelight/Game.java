@@ -187,6 +187,12 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     public NvConnection conn;
     private SpinnerDialog spinner;
     private boolean displayedFailureDialog = false;
+
+    // YugiPC state
+    private boolean yugi;
+    private boolean yugiRestarting;
+    private android.widget.ImageView yugiFrozen;
+    private int yugiRotation;
     private boolean connecting = false;
     public boolean connected = false;
     private boolean autoEnterPip = false;
@@ -356,6 +362,15 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
         // Read the stream preferences
         prefConfig = PreferenceConfiguration.readPreferences(this);
+        yugi = getIntent().getBooleanExtra(EXTRA_YUGI, false);
+        if (yugi) {
+            // YugiPC: follow the device (rotation / fold), exact stream size from the launcher, no stats overlay
+            prefConfig.enablePerfOverlay = false;
+            prefConfig.autoOrientation = true;
+            prefConfig.autoInvertVideoResolution = false;
+            prefConfig.videoScaleMode = PreferenceConfiguration.ScaleMode.STRETCH;
+            prefConfig.enableMicrophone = false; // mic/camera go through the WHIP side channel
+        }
         tombstonePrefs = Game.this.getSharedPreferences("DecoderTombstone", 0);
 
         if (prefConfig.fullScreen) {
@@ -383,9 +398,11 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
         clipboardManager = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
 
-        // Start the spinner
-        spinner = SpinnerDialog.displayDialog(this, getResources().getString(R.string.conn_establishing_title),
-                getResources().getString(R.string.conn_establishing_msg), true);
+        // Start the spinner (YugiPC shows the frozen last frame instead)
+        if (!yugi) {
+            spinner = SpinnerDialog.displayDialog(this, getResources().getString(R.string.conn_establishing_title),
+                    getResources().getString(R.string.conn_establishing_msg), true);
+        }
 
 
         Display currentDisplay = null;
@@ -466,6 +483,13 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         streamContainer.setOnKeyListener(this);
         streamContainer.setInputCallbacks(this);
         streamContainer.setCommitTextEnabled(prefConfig.enableCommitText);
+
+        if (yugi) {
+            yugiRotation = getWindowManager().getDefaultDisplay().getRotation();
+            yugiFrozen = com.limelight.yugi.YugiTransition.addFrozenFrame(this, true);
+            com.limelight.yugi.YugiOverlay.attach(this);
+            com.limelight.yugi.YugiFps.reset(() -> runOnUiThread(this::yugiRestart));
+        }
 
         rootView = streamContainer.getParent();
 
@@ -1147,6 +1171,11 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     }
 
     private void setPreferredOrientationForActivity() {
+        if (yugi) {
+            // YugiPC: always follow the device; a size change triggers a seamless re-stream
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_USER);
+            return;
+        }
         Display display = getActiveDisplay(Game.this, prefConfig);
 
         // For semi-square displays, we use more complex logic to determine which orientation to use (if any)
@@ -1192,6 +1221,11 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+
+        if (yugi && yugiSizeChanged()) {
+            yugiRestart();
+            return;
+        }
 
         // Set requested orientation for possible new screen size
         setPreferredOrientationForActivity();
@@ -3442,7 +3476,44 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     public void stageComplete(String stage) {
     }
 
+    /** YugiPC: true if the window's aspect ratio no longer matches the stream (rotation / fold / unfold). */
+    private boolean yugiSizeChanged() {
+        int w, h;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            android.graphics.Rect b = getWindowManager().getCurrentWindowMetrics().getBounds();
+            w = b.width();
+            h = b.height();
+        } else {
+            android.graphics.Point pt = new android.graphics.Point();
+            getWindowManager().getDefaultDisplay().getRealSize(pt);
+            w = pt.x;
+            h = pt.y;
+        }
+        if (w <= 0 || h <= 0 || prefConfig.width <= 0 || prefConfig.height <= 0) return false;
+        float now = (float) w / h;
+        float stream = (float) prefConfig.width / prefConfig.height;
+        return Math.abs(now / stream - 1f) > 0.03f;
+    }
+
+    /** YugiPC: freeze the last frame, end this stream quietly, and let the launcher re-stream at the new size/FPS. */
+    private void yugiRestart() {
+        if (yugiRestarting) return;
+        yugiRestarting = true;
+        displayedFailureDialog = true; // suppress any termination dialog
+        int newRotation = getWindowManager().getDefaultDisplay().getRotation();
+        com.limelight.yugi.YugiTransition.rotationDelta = ((newRotation - yugiRotation + 4) % 4);
+        com.limelight.yugi.YugiTransition.capture(this, streamContainer.getSurfaceView(), () -> {
+            com.limelight.yugi.YugiTransition.pendingResize = true;
+            stopConnection();
+            finish();
+            overridePendingTransition(0, 0);
+        });
+    }
+
     private void stopConnection() {
+        if (yugi) {
+            com.limelight.yugi.YugiMedia.stop();
+        }
         stopMicrophoneCapture();
 
         if (connecting || connected) {
@@ -3519,7 +3590,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         final int portTestResult = MoonBridge.testClientConnectivity(ServerHelper.CONNECTION_TEST_SERVER, 443, portFlags);
 
         if (errorCode == 0 && portFlags != 0 && (portTestResult == MoonBridge.ML_TEST_RESULT_INCONCLUSIVE || portTestResult == 0)) {
-            spinner.setMessage(getResources().getString(R.string.unlocking_or_starting));
+            if (spinner != null) {
+                spinner.setMessage(getResources().getString(R.string.unlocking_or_starting));
+            }
             return true;
         }
 
@@ -3722,6 +3795,12 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 connecting = false;
                 updatePipAutoEnter();
 
+                if (yugi) {
+                    com.limelight.yugi.YugiTransition.fadeOut(yugiFrozen);
+                    yugiFrozen = null;
+                    com.limelight.yugi.YugiMedia.start(Game.this);
+                }
+
                 // Hide the mouse cursor now after a short delay.
                 // Doing it before dismissing the spinner seems to be undone
                 // when the spinner gets displayed. On Android Q, even now
@@ -3766,8 +3845,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         computer.name = pcName;
         computer.uuid = Game.this.getIntent().getStringExtra(EXTRA_PC_UUID);
         ShortcutHelper shortcutHelper = new ShortcutHelper(this);
-        shortcutHelper.reportComputerShortcutUsed(computer);
-        if (appName != null) {
+        if (!yugi) shortcutHelper.reportComputerShortcutUsed(computer); // YugiPC: no Moonlight launcher shortcuts
+        if (appName != null && !yugi) {
             // This may be null if launched from the "Resume Session" PC context menu item
             shortcutHelper.reportGameLaunched(computer, app);
         }
