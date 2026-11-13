@@ -308,6 +308,7 @@ public final class YugiPlayer {
     private boolean firstFrame;
     private double lastT;          // last known position (s)
     private boolean ytFallback;
+    private boolean videoSized;    // ExoPlayer reported the real video size
     private View focusBeforeFull;
 
     // where the video is on the desktop (updated by "media.rect"; req itself never changes while open)
@@ -458,6 +459,7 @@ public final class YugiPlayer {
             lastT = r.t;
             firstFrame = false;
             ytFallback = false;
+            videoSized = false;
             content.setAlpha(0f);
             closing = false;
             takeDesk(r);
@@ -475,6 +477,7 @@ public final class YugiPlayer {
         closing = false;
         firstFrame = false;
         ytFallback = false;
+        videoSized = false;
         // the shape the user sees on the stream, so the player lands exactly on it
         aspect = r.hasRect() ? r.w / r.h : 16f / 9f;
         takeDesk(r);
@@ -526,11 +529,6 @@ public final class YugiPlayer {
             deskHidden = false;
             deskVideo = u.rect;
             if (u.view != null) deskView = u.view;
-            // YouTube's box is what the embed fills: a new shape (theatre mode, resize) is the new aspect
-            if (web != null && !ytFallback && deskVideo != null) {
-                float a = deskVideo[2] / deskVideo[3];
-                if (Math.abs(a - aspect) > aspect * 0.01f) { aspect = a; layoutTexture(); }
-            }
         }
         retarget(true);
     }
@@ -600,6 +598,14 @@ public final class YugiPlayer {
         float[] t = new float[9];
         boolean wasMini = mini;
         if (!computeTarget(t)) { applyGeometry(); return; }
+        // the shape the user sees on the stream: YouTube's embed fills its box (theatre mode, resize change
+        // it), and any video until its real size is known
+        boolean pageShape = req != null && (("youtube".equals(req.kind) && !ytFallback) || !videoSized);
+        float bw = t[2] - t[0], bh = t[3] - t[1];
+        if (!mini && pageShape && bw > 1 && bh > 1 && Math.abs(bw / bh - aspect) > aspect * 0.01f) {
+            aspect = bw / bh;
+            layoutTexture();
+        }
         if (!hasSrc || !animate) {
             for (SpringAnimation s : followSprings) s.cancel();
             System.arraycopy(t, 0, fv, 0, 9);
@@ -828,6 +834,7 @@ public final class YugiPlayer {
             @Override public void onRenderedFirstFrame() { onFirstFrame(); }
             @Override public void onVideoSizeChanged(VideoSize vs) {
                 if (vs.width > 0 && vs.height > 0) {
+                    videoSized = true;
                     aspect = vs.width * vs.pixelWidthHeightRatio / vs.height;
                     layoutTexture();
                     applyGeometry();
