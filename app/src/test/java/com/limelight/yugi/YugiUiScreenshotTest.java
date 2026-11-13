@@ -209,7 +209,7 @@ public class YugiUiScreenshotTest {
         Rect chipsR = chat.chipsRect();
         Rect ssR = new Rect(chat.cardRect().left + ss.getLeft(), chat.cardRect().top + ss.getTop(),
                 chat.cardRect().left + ss.getRight(), chat.cardRect().top + ss.getBottom());
-        if (chipsR.height() < dp(a, 30)) problems.add("chips too small " + chipsR.toShortString());
+        if (chipsR.height() > 0 && chipsR.height() < dp(a, 30)) problems.add("chips too small " + chipsR.toShortString());
         if (Rect.intersects(chipsR, ssR)) problems.add("chips overlap the session page " + chipsR.toShortString() + " " + ssR.toShortString());
 
         chat.setInsets(ime, 0);

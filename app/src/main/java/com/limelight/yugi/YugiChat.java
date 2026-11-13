@@ -381,6 +381,7 @@ public class YugiChat extends FrameLayout {
         View header, hair, scroll, attach, input, sessions, chips;
         interface Swipe { void onSwipe(int step); }
         Swipe swipe;
+        boolean chipsWanted;
         private float downX, downY;
         private boolean swiping, swipeIgnored;
 
@@ -391,14 +392,14 @@ public class YugiChat extends FrameLayout {
         /** A horizontal swipe on the conversation switches to the next / previous session chip. */
         @Override
         public boolean onInterceptTouchEvent(android.view.MotionEvent e) {
-            if (swipe == null || chips == null || chips.getVisibility() == GONE) return false;
+            if (swipe == null || chips == null || !chipsWanted) return false;
             switch (e.getActionMasked()) {
                 case android.view.MotionEvent.ACTION_DOWN:
                     downX = e.getX();
                     downY = e.getY();
                     swiping = false;
                     // not on the chips, the input row or the attachments
-                    swipeIgnored = downY < chips.getBottom() || downY > input.getTop() - dp(4);
+                    swipeIgnored = (chips.getVisibility() != GONE && downY < chips.getBottom()) || downY > input.getTop() - dp(4);
                     return false;
                 case android.view.MotionEvent.ACTION_MOVE: {
                     if (swipeIgnored) return false;
@@ -449,7 +450,11 @@ public class YugiChat extends FrameLayout {
             int innerW = w - getPaddingLeft() - getPaddingRight();
             int avail = h - getPaddingTop() - getPaddingBottom();
             int exactW = MeasureSpec.makeMeasureSpec(innerW, MeasureSpec.EXACTLY);
-            if (chips != null && chips.getVisibility() != GONE) {
+            // chips only with room to spare (they go first when the keyboard leaves little, before the header)
+            int roomAfterInput = avail - dp(60 + 4);
+            boolean chipsOn = chips != null && chipsWanted && roomAfterInput >= dp(44 + 110);
+            if (chips != null) chips.setVisibility(chipsOn ? VISIBLE : GONE);
+            if (chipsOn) {
                 chips.measure(exactW, MeasureSpec.makeMeasureSpec(dp(38), MeasureSpec.EXACTLY));
                 avail -= chipsH();
             }
@@ -688,8 +693,8 @@ public class YugiChat extends FrameLayout {
 
     private void renderChips() {
         boolean has = chipList != null && chipList.length() > 0;
-        if ((chipScroll.getVisibility() == VISIBLE) != has) {
-            chipScroll.setVisibility(has ? VISIBLE : GONE);
+        if (card.chipsWanted != has) {
+            card.chipsWanted = has;
             if (has) {
                 chipScroll.setAlpha(0f);
                 YugiSpring.to(chipScroll, androidx.dynamicanimation.animation.DynamicAnimation.ALPHA, 1f);
