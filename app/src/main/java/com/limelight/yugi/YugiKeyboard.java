@@ -90,11 +90,7 @@ public class YugiKeyboard extends View {
     private int dragPointer = -1;
     private float dragDX, dragDY;
     private final AudioManager audio;
-    private final YugiKbdSettings.Listener settingsListener = s -> {
-        requestLayout();
-        invalidate();
-        this.host.onGeometryChanged();
-    };
+    private final YugiKbdSettings.Listener settingsListener;
 
     // per-key visual state
     private float[] pressT = new float[0];      // 1 while held, fades after release
@@ -146,6 +142,11 @@ public class YugiKeyboard extends View {
         previewPaint.setTypeface(regular);
         audio = (AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
         set = YugiKbdSettings.get(c);
+        settingsListener = s -> {
+            requestLayout();
+            invalidate();
+            host.onGeometryChanged();
+        };
         for (int i = 0; i < MAXP; i++) pKey[i] = -1;
         setHapticFeedbackEnabled(true);
         setClickable(true);
