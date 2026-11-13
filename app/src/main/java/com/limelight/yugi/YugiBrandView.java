@@ -77,16 +77,18 @@ public class YugiBrandView extends FrameLayout {
 
         ImageView logo = new ImageView(c);
         logo.setImageResource(R.drawable.yugipc_icon_fg);
-        col.addView(logo, new LinearLayout.LayoutParams(dp(120), dp(120)));
+        col.addView(logo, new LinearLayout.LayoutParams(dp(168), dp(168)));
 
         TextView title = YugiTheme.text(c, "YugiPC", 26, 600, YugiTheme.TEXT);
         title.setLetterSpacing(0.02f);
         title.setPadding(0, 0, 0, dp(18));
-        col.addView(title);
+        title.setGravity(Gravity.CENTER);
+        col.addView(title, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         dots = new LinearLayout(c);
         dots.setOrientation(LinearLayout.HORIZONTAL);
         dots.setLayoutDirection(LAYOUT_DIRECTION_LTR);
+        dots.setGravity(Gravity.CENTER);
         for (int i = 0; i < 3; i++) {
             View d = new View(c);
             d.setBackground(YugiTheme.rounded(c, YugiTheme.ACCENT, 4));
@@ -95,7 +97,7 @@ public class YugiBrandView extends FrameLayout {
             lp.rightMargin = dp(5);
             dots.addView(d, lp);
         }
-        col.addView(dots);
+        col.addView(dots, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         status = YugiTheme.text(c, "מתחבר למחשב שלך…", 16, 400, YugiTheme.TEXT_DIM);
         status.setGravity(Gravity.CENTER);
@@ -106,7 +108,7 @@ public class YugiBrandView extends FrameLayout {
         actions.setOrientation(LinearLayout.HORIZONTAL);
         actions.setGravity(Gravity.CENTER);
         actions.setVisibility(GONE);
-        col.addView(actions);
+        col.addView(actions, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         addView(col, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
         setBusy(true);
