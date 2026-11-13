@@ -43,10 +43,12 @@ public final class YugiConfig {
     public static final int BITRATE_120_KBPS = 15000;
 
     /**
-     * Moonlight mouse mode "1" (normal mouse / direct touch): tap = click where touched, drag = drag,
-     * second finger = scroll, long press = right click.
+     * Moonlight mouse mode "0" (multi-touch passthrough): finger touches are sent as native touch
+     * events (LiSendTouchEvent), so Sunshine creates a real touchscreen and KDE behaves like a tablet.
+     * If the host rejects touch events, Moonlight falls back to direct-touch mouse emulation.
+     * A real mouse (SOURCE_MOUSE) is still sent as a normal mouse.
      */
-    public static final String MOUSE_MODE = "1";
+    public static final String MOUSE_MODE = "0";
 
     /** Extra global multiplier on top of the per-screen scale (1.0 = as measured). */
     public static final float RES_SCALE = 1.0f;

@@ -373,8 +373,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             prefConfig.disableWarnings = true;     // no "slow connection" style messages
             prefConfig.resolutionScaleFactor = 100;
             prefConfig.renderMode = 0;             // plain 2D SurfaceView
-            prefConfig.enableMultiTouchScreen = false; // direct touch-as-mouse (mode 1)
+            prefConfig.enableMultiTouchScreen = true;  // native touch passthrough (tablet-like)
             prefConfig.touchscreenTrackpad = false;
+            prefConfig.enableMultiTouchGestures = false; // let the host see every finger
+            prefConfig.enableCommitText = true;          // phone keyboard text (incl. Hebrew) sent as UTF-8
             prefConfig.enableFloatingButton = false;
             prefConfig.bitrate = prefConfig.fps > 60
                     ? com.limelight.yugi.YugiConfig.BITRATE_120_KBPS : com.limelight.yugi.YugiConfig.BITRATE_60_KBPS;

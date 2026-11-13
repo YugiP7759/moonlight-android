@@ -47,3 +47,5 @@ app/.externalNativeBuild/
 
 # agent files
 AGENTS.md
+# YugiPC: private AAR with the Tailscale auth key, never commit
+app/libs/tsbridge.aar

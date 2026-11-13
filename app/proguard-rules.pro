@@ -46,3 +46,6 @@
 # MPAndroidChart
 -keep class com.github.mikephil.charting.** { *; }
 -dontwarn com.github.mikephil.charting.**
+# YugiPC: embedded Tailscale bridge (gomobile), called by reflection
+-keep class com.yugipc.tsbridge.** { *; }
+-keep class go.** { *; }

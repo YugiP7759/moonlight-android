@@ -258,6 +258,18 @@ public class YugiLauncher extends Activity {
         ComputerDetails.AddressTuple addr = new ComputerDetails.AddressTuple(YugiConfig.host, YugiConfig.HTTP_PORT);
         X509Certificate cert = loadCert();
 
+        // 0. Embedded Tailscale (private builds): bring the tailnet up, then talk to 127.0.0.1
+        boolean tunnel = YugiTunnel.isAvailable();
+        if (tunnel) {
+            showStatus("מתחבר לרשת…", true);
+            if (!YugiTunnel.ensureReady(this)) {
+                showError("אין חיבור לרשת. ודא שיש אינטרנט ונסה שוב");
+                return;
+            }
+            showStatus("מתחבר למחשב…", true);
+            addr = new ComputerDetails.AddressTuple(YugiConfig.host, YugiConfig.HTTP_PORT);
+        }
+
         // 1. Reachability
         String serverInfo;
         NvHTTP http;
@@ -266,7 +278,8 @@ public class YugiLauncher extends Activity {
             serverInfo = http.getServerInfo(true);
         } catch (Exception e) {
             LimeLog.warning("YugiPC: server unreachable: " + e);
-            showError("אין חיבור. ודא ש-Tailscale פועל בטלפון");
+            showError(tunnel ? "אין חיבור למחשב. נסה שוב בעוד רגע"
+                    : "אין חיבור. ודא ש-Tailscale פועל בטלפון");
             return;
         }
 
@@ -436,6 +449,8 @@ public class YugiLauncher extends Activity {
                 .putBoolean("checkbox_enable_quit_dialog", false)
                 .putInt("seekbar_bitrate_kbps", s.fps > 60 ? YugiConfig.BITRATE_120_KBPS : YugiConfig.BITRATE_60_KBPS)
                 .putString("mouse_mode_list", YugiConfig.MOUSE_MODE)
+                .putBoolean("checkbox_multi_touch_gestures", false)
+                .putBoolean("checkbox_enable_commit_text", true) // IME text (incl. Hebrew) as UTF-8
                 .putBoolean("checkbox_disable_warnings", true)
                 .putBoolean("checkbox_enable_floating_button", false)
                 .apply();
