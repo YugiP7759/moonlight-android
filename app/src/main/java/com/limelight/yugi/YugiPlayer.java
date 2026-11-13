@@ -312,6 +312,7 @@ public final class YugiPlayer {
         ytFallback = false;
         aspect = r.hasRect() ? r.w / r.h : 16f / 9f;
         layer.bringToFront();
+        YugiTheme.raiseOverlays((ViewGroup) layer.getParent(), layer); // toolbar, chat and Yugi stay above the video
         layer.setVisibility(View.VISIBLE);
         layer.requestFocus();
         source = computeSource();

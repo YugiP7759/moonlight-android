@@ -41,6 +41,29 @@ public final class YugiTheme {
 
     private static Typeface regular, medium, bold;
 
+    // Overlays that always stay above any video surface (YugiPlayer, WebView fullscreen): toolbar, chat, Yugi bubble
+    private static final java.util.Set<android.view.View> ON_TOP =
+            java.util.Collections.newSetFromMap(new java.util.WeakHashMap<>());
+
+    /** Marks an overlay as "always on top" of players and other full-screen surfaces. */
+    public static void keepOnTop(android.view.View v) { ON_TOP.add(v); }
+
+    /**
+     * Call right after {@code surface.bringToFront()}: puts the marked overlays (and whatever already sat above
+     * them, like the YugiPC keyboard) back above the surface, keeping their order. Only reorders, never detaches.
+     */
+    public static void raiseOverlays(android.view.ViewGroup parent, android.view.View surface) {
+        if (parent == null) return;
+        java.util.List<android.view.View> above = new java.util.ArrayList<>();
+        boolean found = false;
+        for (int i = 0; i < parent.getChildCount(); i++) {
+            android.view.View c = parent.getChildAt(i);
+            if (!found && ON_TOP.contains(c)) found = true;
+            if (found && c != surface) above.add(c);
+        }
+        for (android.view.View v : above) v.bringToFront();
+    }
+
     public static int dp(Context c, float v) {
         return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, c.getResources().getDisplayMetrics());
     }

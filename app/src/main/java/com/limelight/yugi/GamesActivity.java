@@ -220,6 +220,7 @@ public class GamesActivity extends Activity {
                 if (customView != null) root.removeView(customView);
                 customView = view;
                 root.addView(view, 1, match());
+                YugiTheme.raiseOverlays(root, view); // toolbar, chat and Yugi stay above the fullscreen video
                 goImmersive();
             }
 

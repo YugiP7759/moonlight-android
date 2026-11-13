@@ -179,6 +179,7 @@ public class YugiChat extends FrameLayout {
         setClickable(false);
         setFocusable(false);
         setVisibility(GONE);
+        YugiTheme.keepOnTop(this);
         setLayoutDirection(LAYOUT_DIRECTION_LTR); // card on the right in every locale; its content is RTL
 
         card = new ChatCard(ctx);

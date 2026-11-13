@@ -61,6 +61,7 @@ public class YugiChatBubble extends ImageView {
         setClickable(true);
         setFocusable(true);
         setVisibility(INVISIBLE); // until the first layout places it
+        YugiTheme.keepOnTop(this);
 
         // Apple-like: critically-damped-ish with a hint of overshoot, interruptible at any time
         springX = new SpringAnimation(this, DynamicAnimation.X);

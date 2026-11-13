@@ -185,4 +185,26 @@ public class YugiChromeDragTest {
         assertTrue(YugiChrome.snapRight(400 + YugiChrome.project(1500), 1000));
         assertFalse(YugiChrome.snapRight(400, 1000));
     }
+
+    @Test
+    public void overlaysStayAboveAnOpeningPlayer() {
+        FrameLayout content = new FrameLayout(a);
+        View stream = new View(a), keyboard = new View(a), player = new View(a);
+        YugiChatBubble bubble = new YugiChatBubble(a, () -> {});
+        content.addView(stream);
+        YugiChrome bar = new YugiChrome(a, Arrays.asList(
+                new YugiChrome.Button(R.drawable.yugi_ic_menu, "תפריט", () -> {})));
+        content.addView(bar);
+        content.addView(bubble);
+        content.addView(keyboard);
+        content.addView(player);
+        // what YugiPlayer.open does
+        player.bringToFront();
+        YugiTheme.raiseOverlays(content, player);
+        assertEquals(stream, content.getChildAt(0));
+        assertEquals(player, content.getChildAt(1));
+        assertEquals(bar, content.getChildAt(2));
+        assertEquals(bubble, content.getChildAt(3));
+        assertEquals(keyboard, content.getChildAt(4));
+    }
 }

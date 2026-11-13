@@ -119,6 +119,7 @@ public class YugiChrome extends FrameLayout {
         // The chrome itself never takes touches; only its children do.
         setClickable(false);
         setFocusable(false);
+        YugiTheme.keepOnTop(this);
         prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         dockRight = prefs.getBoolean("right", true);
         yFraction = prefs.getFloat("y", 0f);
