@@ -266,6 +266,7 @@ public class YugiPlayerTest {
                         + "\"view\":{\"x\":0,\"y\":100,\"w\":1920,\"h\":980,\"sw\":1920,\"sh\":1080}}")));
         layout(decor, w, h);
         shadowOf(Looper.getMainLooper()).idle();
+        p.firstFrameForTest(); // the embed is playing (no watch-page fallback after 12 s of test time)
         assertTrue(p.isOpen());
         assertFalse("opens in the page", p.isFullForTest());
         float sx = stream.getWidth() / 1920f, sy = stream.getHeight() / 1080f;

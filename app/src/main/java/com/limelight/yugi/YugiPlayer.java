@@ -548,7 +548,8 @@ public final class YugiPlayer {
         floatWrap = new FrameLayout(a);
         floatWrap.addView(floatBtn, new FrameLayout.LayoutParams(touch, touch));
         floatBtn.setVisibility(View.GONE);
-        layer.addView(floatWrap, new FrameLayout.LayoutParams(touch, touch, Gravity.TOP | Gravity.LEFT));
+        // under the close button (it stays the layer's top child)
+        layer.addView(floatWrap, layer.indexOfChild(closeWrap), new FrameLayout.LayoutParams(touch, touch, Gravity.TOP | Gravity.LEFT));
 
         // the floating window's buttons, in a row under its video (never over the video's own title)
         floatBar = new FrameLayout(a);
@@ -563,7 +564,7 @@ public final class YugiPlayer {
         floatBar.addView(stopBtn, new FrameLayout.LayoutParams(touch, touch, Gravity.END | Gravity.CENTER_VERTICAL));
         floatBar.setVisibility(View.GONE);
         floatBar.setAlpha(0f);
-        layer.addView(floatBar, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, touch,
+        layer.addView(floatBar, layer.indexOfChild(closeWrap), new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, touch,
                 Gravity.TOP | Gravity.LEFT));
         layer.setOnApplyWindowInsetsListener((v, ins) -> {
             // safe area: system bars and the camera cutout
@@ -1834,6 +1835,9 @@ public final class YugiPlayer {
     boolean isFullForTest() { return full; }
 
     boolean isFloatingForTest() { return floating; }
+
+    /** As if the video drew its first frame (the embed's PLAYING), so no fallback starts during a long test. */
+    void firstFrameForTest() { onFirstFrame(); }
 
     void setFloatingForTest(boolean on) { setFloating(on); }
 
