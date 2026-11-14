@@ -6,7 +6,7 @@ Inputs (download into one directory, pass it as the first argument):
   annotations-{en,he}.xml        CLDR release-46 common/annotations/{en,he}.xml
   annotationsDerived-{en,he}.xml CLDR release-46 common/annotationsDerived/{en,he}.xml
 
-Output: one line per emoji, in Unicode order, fully-qualified only, no components:
+Output: one line per emoji, by category and in Unicode order within it, fully-qualified only, no components:
   category <TAB> emoji <TAB> 5 skin-tone variants (space separated, or empty)
            <TAB> English name <TAB> English keywords (|) <TAB> Hebrew name <TAB> Hebrew keywords (|)
 Categories: 0 smileys, 1 people, 2 nature, 3 food, 4 activities, 5 travel, 6 objects, 7 symbols, 8 flags.
@@ -66,6 +66,8 @@ def main(src, out):
             tones.setdefault(base, {})[used[0]] = s
             continue
         emojis.append((group, s))
+    # emoji-test.txt has Travel before Activities: the picker's tab order wins (stable sort)
+    emojis.sort(key=lambda e: e[0])
     en_n, en_k = load_ann([f"{src}/annotations-en.xml", f"{src}/annotationsDerived-en.xml"])
     he_n, he_k = load_ann([f"{src}/annotations-he.xml", f"{src}/annotationsDerived-he.xml"])
     n = 0

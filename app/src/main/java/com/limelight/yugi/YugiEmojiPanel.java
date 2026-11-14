@@ -137,7 +137,7 @@ final class YugiEmojiPanel {
         ColorMatrix gray = new ColorMatrix();
         gray.setSaturation(0f);
         iconPaint.setColorFilter(new ColorMatrixColorFilter(gray));
-        iconPaint.setAlpha(150);
+        iconPaint.setAlpha(175);
         Typeface medium = YugiTheme.font(host.getContext(), 500);
         label.setTypeface(medium);
         line.setStyle(Paint.Style.STROKE);
@@ -212,19 +212,19 @@ final class YugiEmojiPanel {
 
     private int count(int s) {
         if (s == 0) return recents.size();
-        return data.catStart[s] - data.catStart[s - 1];
+        return data.catCount(s - 1);
     }
 
     /** The emoji shown in section s at position i (with its chosen skin tone). */
     private String item(int s, int i) {
         if (s == 0) return recents.get(i);
-        int d = data.catStart[s - 1] + i;
+        int d = data.catItem(s - 1, i);
         return data.tones[d] != null ? prefs.variant(data.emoji[d]) : data.emoji[d];
     }
 
     private int baseOfItem(int s, int i) {
         if (s == 0) return data.baseOf(recents.get(i));
-        return data.catStart[s - 1] + i;
+        return data.catItem(s - 1, i);
     }
 
     private float maxScroll() { return Math.max(0, contentH - (gridB - gridT)); }
@@ -858,5 +858,9 @@ final class YugiEmojiPanel {
     void longPressForTest() { onLongPress(); }
     float sectionTopForTest(int s) { return secY[s]; }
     int columnsForTest() { return cols; }
+    int indexInSectionForTest(int s, String e) {
+        for (int i = 0; i < count(s); i++) if (item(s, i).equals(e)) return i;
+        return -1;
+    }
     String itemForTest(int s, int i) { return item(s, i); }
 }

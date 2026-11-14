@@ -839,6 +839,91 @@
 3	🔪		kitchen knife	chef|cooking|hocho|kitchen|knife|tool|weapon	סכין מטבח	בישול|כלי נשק|סכין|שף
 3	🫙		jar	condiment|container|empty|nothing|sauce|store	צנצנת	אחסון|מיכל|ריק
 3	🏺		amphora	Aquarius|cooking|drink|jug|tool|weapon|zodiac	כד עתיק	ארכאולוגיה|ארכיאולוגיה|יין|כד|משקה|עתיק|עתיקות
+4	🎃		jack-o-lantern	celebration|halloween|jack|lantern|pumpkin	מנורת דלעת	אור|דלעת|האלווין|ליל כל הקדושים|מנורה
+4	🎄		Christmas tree	celebration|Christmas|tree	עץ אשוח מקושט	אשוח|חג המולד|כריסמס|מקושט
+4	🎆		fireworks	boom|celebration|entertainment|yolo	זיקוקים	זיקוקין|חגיגה|יום העצמאות
+4	🎇		sparkler	boom|celebration|fireworks|sparkle	זיקוק על מקל	זיקוקי דינור|זיקוקים|חגיגה
+4	🧨		firecracker	dynamite|explosive|fire|fireworks|light|pop|popping|spark	זיקוקין די נור	דינמיט|זיקוקים|חזיז
+4	✨		sparkles	*|magic|sparkle|star	נצנוץ	כוכב|כוכבים|נצנוצים
+4	🎈		balloon	birthday|celebrate|celebration	בלון	חגיגה|יום הולדת|לחגוג|מסיבה
+4	🎉		party popper	awesome|birthday|celebrate|celebration|excited|hooray|party|popper|tada|woohoo	פצצת קונפטי	חגיגה|מסיבה|קונפטי
+4	🎊		confetti ball	ball|celebrate|celebration|confetti|party|woohoo	כדור קונפטי	חגיגה|מסיבה|קונפטי
+4	🎋		tanabata tree	banner|celebration|Japanese|tanabata|tree	קישוט חג יפני	חג|חגיגה|יפני|קישוט
+4	🎍		pine decoration	bamboo|celebration|decoration|Japanese|pine|plant	קישוט אצטרובלים	אצטרובלים|במבוק|יפני|קישוט
+4	🎎		Japanese dolls	celebration|doll|dolls|festival|Japanese	בובות יפניות	בובות|חג|יפני|פסטיבל
+4	🎏		carp streamer	carp|celebration|streamer	דגלים בצורת דגי קוי	דגל|חג|חגיגה|יפני|קוי
+4	🎐		wind chime	bell|celebration|chime|wind	פעמון רוח	חג|חגיגה|יפני|פעמון|רוח
+4	🎑		moon viewing ceremony	celebration|ceremony|moon|viewing	טקס ירח	חג|חגיגה|טקס|יפני|ירח
+4	🧧		red envelope	envelope|gift|good|hóngbāo|lai|luck|money|red|see	מעטפה אדומה	כסף|מזל טוב|מתנה|סין
+4	🎀		ribbon	celebration	סרט מתנה	חגיגה|מסיבה|מתנה|סרט
+4	🎁		wrapped gift	birthday|bow|box|celebration|christmas|gift|present|surprise|wrapped	קופסת מתנה	אריזה|יום הולדת|מסיבה|מתנה|עטוף|קופסה|שי
+4	🎗️		reminder ribbon	celebration|reminder|ribbon	סרט הזדהות	זיכרון
+4	🎟️		admission tickets	admission|ticket|tickets	כרטיס כניסה	כניסה|כרטיס
+4	🎫		ticket	admission|stub	כרטיס	כניסה
+4	🎖️		military medal	award|celebration|medal|military	מדליה צבאית	גבורה|גיבור|מדליה|עיטור|צבא
+4	🏆		trophy	champion|champs|prize|slay|sport|victory|win|winning	גביע	אלוף|מקום ראשון|ניצחון|ספורט
+4	🏅		sports medal	award|gold|medal|sports|winner	מדליית ספורט	מדליה|ניצחון|ספורט
+4	🥇		1st place medal	1st|first|gold|medal|place	מדליית זהב	הצטיינות|מקום ראשון
+4	🥈		2nd place medal	2nd|medal|place|second|silver	מדליית כסף	מקום שני
+4	🥉		3rd place medal	3rd|bronze|medal|place|third	מדליית ארד	מקום שלישי
+4	⚽		soccer ball	ball|football|futbol|soccer|sport	כדורגל	כדור|ספורט
+4	⚾		baseball	ball|sport	כדור בסיס	בייסבול|כדור|ספורט
+4	🥎		softball	ball|glove|sports|underarm	סופטבול	בייסבול|כדור|כפפה
+4	🏀		basketball	ball|hoop|sport	כדור סל	כדור|כדורסל|ספורט
+4	🏐		volleyball	ball|game	כדורעף	כדור|משחק|ספורט
+4	🏈		american football	american|ball|bowl|football|sport|super	פוטבול אמריקאי	אמריקאי|כדור|ספורט|פוטבול
+4	🏉		rugby football	ball|football|rugby|sport	כדור רוגבי	כדור|ספורט|רוגבי
+4	🎾		tennis	ball|racquet|sport	כדור טניס	טניס|כדור|מחבט|ספורט
+4	🥏		flying disc	disc|flying|ultimate	פריזבי	דיסק|צלחת מעופפת
+4	🎳		bowling	ball|game|sport|strike	כדור באולינג	באולינג|כדור|כדורת|משחק|פינים
+4	🏏		cricket game	ball|bat|cricket|game	קריקט	כדור|מחבט|משחק|ספורט
+4	🏑		field hockey	ball|field|game|hockey|stick	הוקי שדה	הוקי|מחבט|ספורט|שדה
+4	🏒		ice hockey	game|hockey|ice|puck|stick	מקל ודיסקית של הוקי קרח	הוקי|מחבט|ספורט|קרח
+4	🥍		lacrosse	ball|goal|sports|stick	לקרוס	כדור|מקל|משחק רשת
+4	🏓		ping pong	ball|bat|game|paddle|ping|pingpong|pong|table|tennis	פינג פונג	טניס שולחן|כדור|מחבט|משחק
+4	🏸		badminton	birdie|game|racquet|shuttlecock	בדמינטון	כדור נוצה|מחבט|רקטה
+4	🥊		boxing glove	boxing|glove	כפפת אגרוף	אגרוף|איגרוף|בוקס|כפפה
+4	🥋		martial arts uniform	arts|judo|karate|martial|taekwondo|uniform	חליפת אומנויות לחימה	אמנויות לחימה|ג’ודו|חגורה שחורה|חליפה|טקוואנדו|ספורט|קראטה
+4	🥅		goal net	goal|net	שער כדורגל	גול|מטרה|שער רשת
+4	⛳		flag in hole	flag|golf|hole|sport	דגל גולף	גולף|גומה|דגל|משחק
+4	⛸️		ice skate	ice|skate|skating	נעל החלקה על קרח	החלקה|נעל|קרח
+4	🎣		fishing pole	entertainment|fish|fishing|pole|sport	חכת דיג	דג|דיג|דייג|חכה
+4	🤿		diving mask	diving|mask|scuba|snorkeling	מסיכת צלילה	לצלול|צלילה|שנורקל
+4	🎽		running shirt	athletics|running|sash|shirt	חולצת ריצה	ג׳וגינג|חולצה|ספורט|ריצה
+4	🎿		skis	ski|snow|sport	מגלשי סקי	מגלשיים|ספורט|סקי|שלג
+4	🛷		sled	luge|sledge|sleigh|snow|toboggan	מִזְחֶלֶת	מזחלת|שלג
+4	🥌		curling stone	curling|game|rock|stone	אבן קרלינג	אבן|משחק
+4	🎯		bullseye	bull|dart|direct|entertainment|game|hit|target	פגיעה בול	בול|בול פגיעה|חץ|מטרה|משחק|קליעה
+4	🪀		yo-yo	fluctuate|toy	יו-יו	יויו|עולה ויורד|צעצוע
+4	🪁		kite	fly|soar	עפיפון	להעיף|מתעופף|מתרומם
+4	🔫		water pistol	gun|handgun|pistol|revolver|tool|water|weapon	אקדח מים	אקדח|ירי|יריות|ירייה|כלי נשק|נשק
+4	🎱		pool 8 ball	8|8ball|ball|billiard|eight|game|pool	כדור ביליארד	ביליארד|כדור|משחק|סנוקר
+4	🔮		crystal ball	ball|crystal|fairy|fairytale|fantasy|fortune|future|magic|tale|tool	כדור בדולח	מזל|נבואה|ניבוי|עתידות|קריסטל|ראיית הנולד
+4	🪄		magic wand	magic|magician|wand|witch|wizard	שרביט קסמים	מכשף|מכשפה|קוסם|קוסמים|קסם|קסמים|שרביט
+4	🎮		video game	controller|entertainment|game|video	משחק וידאו	ג׳ויסטיק|וידאו|מחשב|משחק|קונסולה|שלט משחק
+4	🕹️		joystick	game|video|videogame	ג׳ויסטיק	מחשב|משחק|משחקי וידאו
+4	🎰		slot machine	casino|gamble|gambling|game|machine|slot|slots	מכונת מזל	הימורים|מהמר|מזל|משחק|קזינו
+4	🎲		game die	dice|die|entertainment|game	קוביית משחק	מהמר|מזל|משחק|קובייה
+4	🧩		puzzle piece	clue|interlocking|jigsaw|piece|puzzle	חלק בפאזל	התאמה|חתיכה מהפאזל|פאזל|קשר|רמז
+4	🧸		teddy bear	bear|plaything|plush|stuffed|teddy|toy	דובי	בובה|דובון|ילדים|צעצוע
+4	🪅		piñata	candy|celebrate|celebration|cinco|de|festive|mayo|party|pinada|pinata	פיניאטה	חגיגה|מסיבה|פינייטה
+4	🪩		mirror ball	ball|dance|disco|glitter|mirror|party	כדור מראה	בילויים|דיסקו|כדור דיסקו|מסיבות|נצנצים|ריקודים
+4	🪆		nesting dolls	babooshka|baboushka|babushka|doll|dolls|matryoshka|nesting|russia	בבושקה	בובה|בובות בבושקה|מטריושקה|רוסית
+4	♠️		spade suit	card|game|spade|suit	קלף עלה	משחק|עלה|קלף|קלפים
+4	♥️		heart suit	card|emotion|game|heart|hearts|suit	קלף לב	אהבה|לב|משחק|קלף
+4	♦️		diamond suit	card|diamond|game|suit	קלף יהלום	יהלום|משחק|קלף
+4	♣️		club suit	card|club|clubs|game|suit	קלף תלתן	משחק|קלף|קלפים|תלתן
+4	♟️		chess pawn	chess|dupe|expendable|pawn	פיון בשחמט	פיון|רגלי|שח|שחמט
+4	🃏		joker	card|game|wildcard	ג׳וקר	משחק|קלף
+4	🀄		mahjong red dragon	dragon|game|mahjong|red	דרקון אדום מה-ג׳ונג	אדום|דרקון|דרקון אדום במה-ג׳ונג|מה-ג׳ונג|משחק
+4	🎴		flower playing cards	card|cards|flower|game|Japanese|playing	קלפי פרחים	יפני|משחק|קלף
+4	🎭		performing arts	actor|actress|art|arts|entertainment|mask|performing|theater|theatre|thespian	אמנויות הבמה	במה|דרמה|מסיכות|משחק|פורים|תיאטרון
+4	🖼️		framed picture	art|frame|framed|museum|painting|picture	מסגרת עם תמונה	אמנות|מוזיאון|מסגרת|ציור|תמונה
+4	🎨		artist palette	art|artist|artsy|arty|colorful|creative|entertainment|museum|painter|painting|palette	פלטת צבעים	אמן|אמנות|מוזיאון|צבעים|ציור
+4	🧵		thread	needle|sewing|spool|string	חוט	מחט|סליל|תפירה
+4	🪡		sewing needle	embroidery|needle|sew|sewing|stitches|sutures|tailoring|thread	מחט	לרקום|לתפור|רקמה|תפירה
+4	🧶		yarn	ball|crochet|knit	צמר	כדור צמר|סריגה|קרושה
+4	🪢		knot	cord|rope|tangled|tie|twine|twist	קשר	חבל|לקשור|עניבה|קשירה
 5	🌍		globe showing Europe-Africa	Africa|earth|Europe|Europe-Africa|globe|showing|world	גלובוס עם אירופה ואפריקה	אירופה|אפריקה|גלובוס|כדור הארץ|עולם
 5	🌎		globe showing Americas	Americas|earth|globe|showing|world	גלובוס עם אמריקה	אמריקה|גלובוס|כדור הארץ|עולם
 5	🌏		globe showing Asia-Australia	Asia|Asia-Australia|Australia|earth|globe|showing|world	גלובוס עם אסיה ואוסטרליה	אוסטרליה|אסיה|גלובוס|כדור הארץ
@@ -1057,91 +1142,6 @@
 5	🔥		fire	af|burn|flame|hot|lit|litaf|tool	אש	דליקה|להבה|שלהבת|שריפה
 5	💧		droplet	cold|comic|drop|nature|sad|sweat|tear|water|weather	טיפה	דמעה|מזג אוויר|מזג האוויר|מים|קור|קר
 5	🌊		water wave	nature|ocean|surf|surfer|surfing|water|wave	גל	ים|סערה
-4	🎃		jack-o-lantern	celebration|halloween|jack|lantern|pumpkin	מנורת דלעת	אור|דלעת|האלווין|ליל כל הקדושים|מנורה
-4	🎄		Christmas tree	celebration|Christmas|tree	עץ אשוח מקושט	אשוח|חג המולד|כריסמס|מקושט
-4	🎆		fireworks	boom|celebration|entertainment|yolo	זיקוקים	זיקוקין|חגיגה|יום העצמאות
-4	🎇		sparkler	boom|celebration|fireworks|sparkle	זיקוק על מקל	זיקוקי דינור|זיקוקים|חגיגה
-4	🧨		firecracker	dynamite|explosive|fire|fireworks|light|pop|popping|spark	זיקוקין די נור	דינמיט|זיקוקים|חזיז
-4	✨		sparkles	*|magic|sparkle|star	נצנוץ	כוכב|כוכבים|נצנוצים
-4	🎈		balloon	birthday|celebrate|celebration	בלון	חגיגה|יום הולדת|לחגוג|מסיבה
-4	🎉		party popper	awesome|birthday|celebrate|celebration|excited|hooray|party|popper|tada|woohoo	פצצת קונפטי	חגיגה|מסיבה|קונפטי
-4	🎊		confetti ball	ball|celebrate|celebration|confetti|party|woohoo	כדור קונפטי	חגיגה|מסיבה|קונפטי
-4	🎋		tanabata tree	banner|celebration|Japanese|tanabata|tree	קישוט חג יפני	חג|חגיגה|יפני|קישוט
-4	🎍		pine decoration	bamboo|celebration|decoration|Japanese|pine|plant	קישוט אצטרובלים	אצטרובלים|במבוק|יפני|קישוט
-4	🎎		Japanese dolls	celebration|doll|dolls|festival|Japanese	בובות יפניות	בובות|חג|יפני|פסטיבל
-4	🎏		carp streamer	carp|celebration|streamer	דגלים בצורת דגי קוי	דגל|חג|חגיגה|יפני|קוי
-4	🎐		wind chime	bell|celebration|chime|wind	פעמון רוח	חג|חגיגה|יפני|פעמון|רוח
-4	🎑		moon viewing ceremony	celebration|ceremony|moon|viewing	טקס ירח	חג|חגיגה|טקס|יפני|ירח
-4	🧧		red envelope	envelope|gift|good|hóngbāo|lai|luck|money|red|see	מעטפה אדומה	כסף|מזל טוב|מתנה|סין
-4	🎀		ribbon	celebration	סרט מתנה	חגיגה|מסיבה|מתנה|סרט
-4	🎁		wrapped gift	birthday|bow|box|celebration|christmas|gift|present|surprise|wrapped	קופסת מתנה	אריזה|יום הולדת|מסיבה|מתנה|עטוף|קופסה|שי
-4	🎗️		reminder ribbon	celebration|reminder|ribbon	סרט הזדהות	זיכרון
-4	🎟️		admission tickets	admission|ticket|tickets	כרטיס כניסה	כניסה|כרטיס
-4	🎫		ticket	admission|stub	כרטיס	כניסה
-4	🎖️		military medal	award|celebration|medal|military	מדליה צבאית	גבורה|גיבור|מדליה|עיטור|צבא
-4	🏆		trophy	champion|champs|prize|slay|sport|victory|win|winning	גביע	אלוף|מקום ראשון|ניצחון|ספורט
-4	🏅		sports medal	award|gold|medal|sports|winner	מדליית ספורט	מדליה|ניצחון|ספורט
-4	🥇		1st place medal	1st|first|gold|medal|place	מדליית זהב	הצטיינות|מקום ראשון
-4	🥈		2nd place medal	2nd|medal|place|second|silver	מדליית כסף	מקום שני
-4	🥉		3rd place medal	3rd|bronze|medal|place|third	מדליית ארד	מקום שלישי
-4	⚽		soccer ball	ball|football|futbol|soccer|sport	כדורגל	כדור|ספורט
-4	⚾		baseball	ball|sport	כדור בסיס	בייסבול|כדור|ספורט
-4	🥎		softball	ball|glove|sports|underarm	סופטבול	בייסבול|כדור|כפפה
-4	🏀		basketball	ball|hoop|sport	כדור סל	כדור|כדורסל|ספורט
-4	🏐		volleyball	ball|game	כדורעף	כדור|משחק|ספורט
-4	🏈		american football	american|ball|bowl|football|sport|super	פוטבול אמריקאי	אמריקאי|כדור|ספורט|פוטבול
-4	🏉		rugby football	ball|football|rugby|sport	כדור רוגבי	כדור|ספורט|רוגבי
-4	🎾		tennis	ball|racquet|sport	כדור טניס	טניס|כדור|מחבט|ספורט
-4	🥏		flying disc	disc|flying|ultimate	פריזבי	דיסק|צלחת מעופפת
-4	🎳		bowling	ball|game|sport|strike	כדור באולינג	באולינג|כדור|כדורת|משחק|פינים
-4	🏏		cricket game	ball|bat|cricket|game	קריקט	כדור|מחבט|משחק|ספורט
-4	🏑		field hockey	ball|field|game|hockey|stick	הוקי שדה	הוקי|מחבט|ספורט|שדה
-4	🏒		ice hockey	game|hockey|ice|puck|stick	מקל ודיסקית של הוקי קרח	הוקי|מחבט|ספורט|קרח
-4	🥍		lacrosse	ball|goal|sports|stick	לקרוס	כדור|מקל|משחק רשת
-4	🏓		ping pong	ball|bat|game|paddle|ping|pingpong|pong|table|tennis	פינג פונג	טניס שולחן|כדור|מחבט|משחק
-4	🏸		badminton	birdie|game|racquet|shuttlecock	בדמינטון	כדור נוצה|מחבט|רקטה
-4	🥊		boxing glove	boxing|glove	כפפת אגרוף	אגרוף|איגרוף|בוקס|כפפה
-4	🥋		martial arts uniform	arts|judo|karate|martial|taekwondo|uniform	חליפת אומנויות לחימה	אמנויות לחימה|ג’ודו|חגורה שחורה|חליפה|טקוואנדו|ספורט|קראטה
-4	🥅		goal net	goal|net	שער כדורגל	גול|מטרה|שער רשת
-4	⛳		flag in hole	flag|golf|hole|sport	דגל גולף	גולף|גומה|דגל|משחק
-4	⛸️		ice skate	ice|skate|skating	נעל החלקה על קרח	החלקה|נעל|קרח
-4	🎣		fishing pole	entertainment|fish|fishing|pole|sport	חכת דיג	דג|דיג|דייג|חכה
-4	🤿		diving mask	diving|mask|scuba|snorkeling	מסיכת צלילה	לצלול|צלילה|שנורקל
-4	🎽		running shirt	athletics|running|sash|shirt	חולצת ריצה	ג׳וגינג|חולצה|ספורט|ריצה
-4	🎿		skis	ski|snow|sport	מגלשי סקי	מגלשיים|ספורט|סקי|שלג
-4	🛷		sled	luge|sledge|sleigh|snow|toboggan	מִזְחֶלֶת	מזחלת|שלג
-4	🥌		curling stone	curling|game|rock|stone	אבן קרלינג	אבן|משחק
-4	🎯		bullseye	bull|dart|direct|entertainment|game|hit|target	פגיעה בול	בול|בול פגיעה|חץ|מטרה|משחק|קליעה
-4	🪀		yo-yo	fluctuate|toy	יו-יו	יויו|עולה ויורד|צעצוע
-4	🪁		kite	fly|soar	עפיפון	להעיף|מתעופף|מתרומם
-4	🔫		water pistol	gun|handgun|pistol|revolver|tool|water|weapon	אקדח מים	אקדח|ירי|יריות|ירייה|כלי נשק|נשק
-4	🎱		pool 8 ball	8|8ball|ball|billiard|eight|game|pool	כדור ביליארד	ביליארד|כדור|משחק|סנוקר
-4	🔮		crystal ball	ball|crystal|fairy|fairytale|fantasy|fortune|future|magic|tale|tool	כדור בדולח	מזל|נבואה|ניבוי|עתידות|קריסטל|ראיית הנולד
-4	🪄		magic wand	magic|magician|wand|witch|wizard	שרביט קסמים	מכשף|מכשפה|קוסם|קוסמים|קסם|קסמים|שרביט
-4	🎮		video game	controller|entertainment|game|video	משחק וידאו	ג׳ויסטיק|וידאו|מחשב|משחק|קונסולה|שלט משחק
-4	🕹️		joystick	game|video|videogame	ג׳ויסטיק	מחשב|משחק|משחקי וידאו
-4	🎰		slot machine	casino|gamble|gambling|game|machine|slot|slots	מכונת מזל	הימורים|מהמר|מזל|משחק|קזינו
-4	🎲		game die	dice|die|entertainment|game	קוביית משחק	מהמר|מזל|משחק|קובייה
-4	🧩		puzzle piece	clue|interlocking|jigsaw|piece|puzzle	חלק בפאזל	התאמה|חתיכה מהפאזל|פאזל|קשר|רמז
-4	🧸		teddy bear	bear|plaything|plush|stuffed|teddy|toy	דובי	בובה|דובון|ילדים|צעצוע
-4	🪅		piñata	candy|celebrate|celebration|cinco|de|festive|mayo|party|pinada|pinata	פיניאטה	חגיגה|מסיבה|פינייטה
-4	🪩		mirror ball	ball|dance|disco|glitter|mirror|party	כדור מראה	בילויים|דיסקו|כדור דיסקו|מסיבות|נצנצים|ריקודים
-4	🪆		nesting dolls	babooshka|baboushka|babushka|doll|dolls|matryoshka|nesting|russia	בבושקה	בובה|בובות בבושקה|מטריושקה|רוסית
-4	♠️		spade suit	card|game|spade|suit	קלף עלה	משחק|עלה|קלף|קלפים
-4	♥️		heart suit	card|emotion|game|heart|hearts|suit	קלף לב	אהבה|לב|משחק|קלף
-4	♦️		diamond suit	card|diamond|game|suit	קלף יהלום	יהלום|משחק|קלף
-4	♣️		club suit	card|club|clubs|game|suit	קלף תלתן	משחק|קלף|קלפים|תלתן
-4	♟️		chess pawn	chess|dupe|expendable|pawn	פיון בשחמט	פיון|רגלי|שח|שחמט
-4	🃏		joker	card|game|wildcard	ג׳וקר	משחק|קלף
-4	🀄		mahjong red dragon	dragon|game|mahjong|red	דרקון אדום מה-ג׳ונג	אדום|דרקון|דרקון אדום במה-ג׳ונג|מה-ג׳ונג|משחק
-4	🎴		flower playing cards	card|cards|flower|game|Japanese|playing	קלפי פרחים	יפני|משחק|קלף
-4	🎭		performing arts	actor|actress|art|arts|entertainment|mask|performing|theater|theatre|thespian	אמנויות הבמה	במה|דרמה|מסיכות|משחק|פורים|תיאטרון
-4	🖼️		framed picture	art|frame|framed|museum|painting|picture	מסגרת עם תמונה	אמנות|מוזיאון|מסגרת|ציור|תמונה
-4	🎨		artist palette	art|artist|artsy|arty|colorful|creative|entertainment|museum|painter|painting|palette	פלטת צבעים	אמן|אמנות|מוזיאון|צבעים|ציור
-4	🧵		thread	needle|sewing|spool|string	חוט	מחט|סליל|תפירה
-4	🪡		sewing needle	embroidery|needle|sew|sewing|stitches|sutures|tailoring|thread	מחט	לרקום|לתפור|רקמה|תפירה
-4	🧶		yarn	ball|crochet|knit	צמר	כדור צמר|סריגה|קרושה
-4	🪢		knot	cord|rope|tangled|tie|twine|twist	קשר	חבל|לקשור|עניבה|קשירה
 6	👓		glasses	clothing|eye|eyeglasses|eyewear	משקפיים	עיניים
 6	🕶️		sunglasses	dark|eye|eyewear|glasses	משקפי שמש	משקפיים|שמש
 6	🥽		goggles	dive|eye|protection|scuba|swimming|welding	משקפי שחייה	משקפי מגן|משקפיים|משקפת|סקי

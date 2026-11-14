@@ -134,7 +134,7 @@ public class YugiEmojiPanelTest {
         p.settleForTest();
         assertEquals(name + ": people tab", 2, p.currentSection());
         YugiEmojiData d = YugiEmojiData.get(a);
-        int wave = d.indexOf("👋") - d.catStart[1];
+        int wave = p.indexInSectionForTest(2, "👋");
         assertEquals("👋 opens the people", 0, wave);
         float[] tc = p.cellCenterForTest(2, wave);
         assertTrue(name + ": 👋 visible", tc[1] > g[0] && tc[1] < g[1]);

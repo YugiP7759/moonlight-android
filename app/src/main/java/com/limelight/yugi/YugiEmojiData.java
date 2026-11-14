@@ -38,6 +38,13 @@ public final class YugiEmojiData {
 
     private static YugiEmojiData loaded;
 
+    /** Emoji this device can draw as one glyph (all, until {@link #keepOnly}), and their indices per category. */
+    private final boolean[] shown;
+    private int[][] byCat;
+
+    /** Whether the device's font draws an emoji (sequence) as one glyph. */
+    public interface Glyphs { boolean has(String s); }
+
     private YugiEmojiData(List<String[]> rows) {
         int n = rows.size();
         emoji = new String[n];
@@ -60,7 +67,40 @@ public final class YugiEmojiData {
             keyWords[i] = words(enK.replace('|', ' ') + " " + heK.replace('|', ' '));
         }
         while (lastCat < CATEGORIES) catStart[++lastCat] = n;
+        shown = new boolean[n];
+        Arrays.fill(shown, true);
+        index();
     }
+
+    private void index() {
+        byCat = new int[CATEGORIES][];
+        for (int c = 0; c < CATEGORIES; c++) {
+            int k = 0;
+            for (int i = catStart[c]; i < catStart[c + 1]; i++) if (shown[i]) k++;
+            byCat[c] = new int[k];
+            k = 0;
+            for (int i = catStart[c]; i < catStart[c + 1]; i++) if (shown[i]) byCat[c][k++] = i;
+        }
+    }
+
+    /**
+     * Hides emoji the font can't draw (an older phone, a newer emoji: no empty boxes, no ZWJ sequences
+     * falling apart), and skin tones it lacks.
+     */
+    public void keepOnly(Glyphs g) {
+        for (int i = 0; i < emoji.length; i++) {
+            shown[i] = g.has(emoji[i]);
+            if (tones[i] != null) {
+                for (String t : tones[i]) if (!g.has(t)) { tones[i] = null; break; }
+            }
+        }
+        index();
+    }
+
+    /** Emoji shown in a category, and the data index of the i-th. */
+    public int catCount(int c) { return byCat[c].length; }
+    public int catItem(int c, int i) { return byCat[c][i]; }
+    public boolean isShown(int i) { return shown[i]; }
 
     /** Parses the asset format (tests feed it directly). */
     public static YugiEmojiData parse(InputStream in) throws IOException {
@@ -78,11 +118,18 @@ public final class YugiEmojiData {
     /** The data, loading it on first use (blocks while a {@link #prefetch} is still reading). */
     public static synchronized YugiEmojiData get(Context c) {
         if (loaded == null) {
+            YugiEmojiData d;
             try (InputStream in = c.getApplicationContext().getAssets().open(ASSET)) {
-                loaded = parse(in);
+                d = parse(in);
             } catch (IOException e) {
-                loaded = new YugiEmojiData(new ArrayList<>());
+                d = new YugiEmojiData(new ArrayList<>());
             }
+            if (android.os.Build.VERSION.SDK_INT >= 23) {
+                android.graphics.Paint p = new android.graphics.Paint();
+                // a font that reports no glyph even for 😀 can't be asked (keep everything)
+                if (p.hasGlyph("😀")) d.keepOnly(p::hasGlyph);
+            }
+            loaded = d;
         }
         return loaded;
     }
@@ -138,6 +185,7 @@ public final class YugiEmojiData {
         int n = emoji.length;
         List<long[]> hits = new ArrayList<>();
         for (int i = 0; i < n; i++) {
+            if (!shown[i]) continue;
             int level = match(i, q, whole);
             if (level < 0) continue;
             long key = ((long) level << 40) | ((long) (POPULAR.contains(emoji[i]) ? 0 : 1) << 36)
