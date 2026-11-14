@@ -290,7 +290,7 @@ public class YugiPlayerTest {
         // another redirect's rect is ignored
         p.updateRect(YugiPlayer.RectUpdate.parse(new JSONObject("{\"id\":\"other\",\"hidden\":true}")));
         settle();
-        assertFalse(p.isMiniForTest());
+        assertFalse(p.isFloatingForTest());
 
         // scrolled off the screen: it stays in the page (not seen there), still playing, never floats by itself
         p.updateRect(YugiPlayer.RectUpdate.parse(new JSONObject(
