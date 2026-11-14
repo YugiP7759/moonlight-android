@@ -14,6 +14,7 @@ import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.os.Looper;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
@@ -163,12 +164,23 @@ public class YugiPlayerTest {
         assertEquals(540, m.height(), 0.01);
         assertEquals(0.5f, YugiPlayer.visibleFraction(m, stream), 0.001f);
         assertEquals(0f, YugiPlayer.visibleFraction(new RectF(0, -600, 100, -10), stream), 0f);
-        RectF mini = YugiPlayer.miniRect(16f / 9f, 1080, 2400, 0, 0, 120, 40, 840, false);
-        assertEquals(2400 - 120 - 40, mini.bottom, 0.01);
-        assertEquals(1080 - 40, mini.right, 0.01);
-        assertEquals(16f / 9f, mini.width() / mini.height(), 0.01);
-        RectF left = YugiPlayer.miniRect(16f / 9f, 1080, 2400, 30, 0, 0, 40, 840, true);
-        assertEquals(70, left.left, 0.01);
+        // the floating window: bottom right (corner 0), its button band of 150 under it, clear of the bars
+        float[] inset = {0, 80, 0, 120};
+        RectF fl = YugiPlayer.floatRect(16f / 9f, 1080, 2400, inset, 40, 600, 900, 150, 0);
+        assertEquals(2400 - 120 - 40 - 150, fl.bottom, 0.01);
+        assertEquals(1080 - 40, fl.right, 0.01);
+        assertEquals(16f / 9f, fl.width() / fl.height(), 0.01);
+        assertTrue("never narrower than its minimum", fl.width() >= 600 - 0.01);
+        RectF tl = YugiPlayer.floatRect(16f / 9f, 1080, 2400, new float[]{30, 80, 0, 0}, 40, 600, 900, 150, 3);
+        assertEquals(70, tl.left, 0.01);
+        assertEquals(120, tl.top, 0.01);
+        // a narrow screen: the minimum gives way to the room there is
+        RectF narrow = YugiPlayer.floatRect(16f / 9f, 500, 1000, new float[]{0, 0, 0, 0}, 20, 600, 900, 100, 0);
+        assertEquals(460, narrow.width(), 0.01);
+        assertEquals(0, YugiPlayer.cornerFor(900, 2000, 1080, 2400));
+        assertEquals(1, YugiPlayer.cornerFor(100, 2000, 1080, 2400));
+        assertEquals(3, YugiPlayer.cornerFor(100, 200, 1080, 2400));
+        assertEquals(2, YugiPlayer.cornerFor(900, 200, 1080, 2400));
         RectF in = YugiPlayer.fitInto(16f / 9f, new RectF(100, 100, 500, 500));
         assertEquals(300, in.centerY(), 0.01);
         assertEquals(400, in.width(), 0.01);
@@ -177,8 +189,57 @@ public class YugiPlayerTest {
         assertNull(YugiPlayer.RectUpdate.parse(new JSONObject("{\"rect\":{}}")));
     }
 
+    private static YugiPlayer.RectUpdate rect(float y, double ts, long seq) throws Exception {
+        return YugiPlayer.RectUpdate.parse(new JSONObject("{\"id\":\"q\",\"rect\":{\"x\":100,\"y\":" + y
+                + ",\"w\":800,\"h\":450,\"sw\":1920,\"sh\":1080},\"ts\":" + ts + ",\"seq\":" + seq + "}"));
+    }
+
     /**
-     * Opens in the page (never full screen by itself), follows the page, docks as mini off screen,
+     * The page's moves replayed on its own clock: reports that arrive in bursts, late or out of order still
+     * give an even motion, a fixed delay behind the fastest report.
+     */
+    @Test
+    public void rectTrackReplaysThePageTiming() throws Exception {
+        YugiPlayer.RectTrack tr = new YugiPlayer.RectTrack(40);
+        float[] r = new float[6], v = new float[6];
+        assertEquals(0, tr.at(0, r, v));
+        // the page scrolls 10 px every 16 ms; the phone gets the reports in uneven bursts, 100..160 ms later
+        double[] arrive = {1100, 1116, 1150, 1150, 1170, 1210, 1210};
+        for (int i = 0; i < arrive.length; i++) {
+            assertTrue(tr.add(rect(500 - 10 * i, 1000 + 16 * i, i + 1), arrive[i]));
+        }
+        // baseline = 100 ms (the fastest), so the playhead is now - 140
+        assertEquals(1000 + 24, tr.playhead(1164), 1e-6);
+        assertEquals(1, tr.at(1164, r, v));
+        assertEquals("halfway between two reports", 500 - 15, r[1], 0.01);
+        assertTrue(tr.pending(1164));
+        // a late duplicate / older report is dropped
+        assertFalse(tr.add(rect(999, 1010, 3), 1215));
+        // the motion is even even though the reports came in bursts
+        float prev = Float.NaN;
+        for (double now = 1164; now <= 1212; now += 16) {
+            tr.at(now, r, v);
+            if (!Float.isNaN(prev)) assertEquals(-10, r[1] - prev, 0.01);
+            prev = r[1];
+        }
+        // past the last report: it stays there, nothing pending
+        assertEquals(1, tr.at(5000, r, v));
+        assertEquals(500 - 60, r[1], 0.01);
+        assertFalse(tr.pending(5000));
+        // hidden is a step, at its time
+        tr.add(YugiPlayer.RectUpdate.parse(new JSONObject("{\"id\":\"q\",\"hidden\":true,\"ts\":1200,\"seq\":9}")), 5001);
+        assertEquals(2, tr.at(5001 + 200, r, v));
+        // an older extension (no ts / seq): its arrival is the clock
+        YugiPlayer.RectTrack old = new YugiPlayer.RectTrack(40);
+        old.add(YugiPlayer.RectUpdate.parse(new JSONObject("{\"id\":\"q\",\"rect\":{\"x\":1,\"y\":2,\"w\":30,\"h\":40,\"sw\":1920,\"sh\":1080}}")), 100);
+        assertEquals(1, old.at(100 + 40, r, v));
+        assertEquals(2, r[1], 0.01);
+        assertEquals("no viewport in the report", 0, v[2], 0.01);
+    }
+
+    /**
+     * Opens in the page (never full screen by itself), follows the page, stays in the page when the video
+     * scrolls off (never floats by itself), floats only by its button (two buttons under the window),
      * toggles full screen, Back collapses, and touches outside the player go to the stream.
      */
     @Test @Config(qualifiers = "w750dp-h832dp-port-420dpi")
@@ -231,17 +292,51 @@ public class YugiPlayerTest {
         settle();
         assertFalse(p.isMiniForTest());
 
-        // scrolled off the screen: docked mini, still playing
+        // scrolled off the screen: it stays in the page (not seen there), still playing, never floats by itself
         p.updateRect(YugiPlayer.RectUpdate.parse(new JSONObject(
                 "{\"id\":\"q\",\"rect\":{\"x\":300,\"y\":-500,\"w\":800,\"h\":450,\"sw\":1920,\"sh\":1080}}")));
         settle();
-        assertTrue(p.isMiniForTest());
+        assertFalse("never floats by itself", p.isFloatingForTest());
         assertTrue(p.isOpen());
         shown = p.shownForTest();
-        assertTrue("mini at the bottom " + shown, shown.bottom > h * 0.8f && shown.bottom <= h);
-        snap(decor, w, h, "player-mini");
+        assertTrue("nothing shown off the page " + shown, shown.height() < 1 || shown.bottom <= 100 * sy + 1);
+        assertTrue("the stream gets the touches there", p.passesThroughForTest(w / 2f, h / 2f));
+        snap(decor, w, h, "player-offpage");
+
+        // back in view, then the floating window by its button: bottom corner, its two buttons under it
+        p.updateRect(YugiPlayer.RectUpdate.parse(new JSONObject(
+                "{\"id\":\"q\",\"rect\":{\"x\":300,\"y\":200,\"w\":800,\"h\":450,\"sw\":1920,\"sh\":1080},"
+                        + "\"view\":{\"x\":0,\"y\":100,\"w\":1920,\"h\":980,\"sw\":1920,\"sh\":1080}}")));
+        settle();
+        p.setFloatingForTest(true);
+        settle();
+        assertTrue(p.isFloatingForTest());
+        shown = p.shownForTest();
+        layout(decor, w, h);
+        RectF bar = p.floatBarForTest();
+        assertTrue("floating at the bottom " + shown, shown.bottom > h * 0.6f && bar.bottom <= h);
+        assertTrue("its buttons are under the video, not on it " + bar, bar.top >= shown.bottom);
+        assertTrue("48dp row", bar.height() >= 48 * a.getResources().getDisplayMetrics().density - 1);
+        assertFalse(p.passesThroughForTest(shown.centerX(), shown.centerY()));
+        assertFalse(p.passesThroughForTest(bar.centerX(), bar.centerY()));
+        assertTrue(p.passesThroughForTest(w / 2f, 40));
+        snap(decor, w, h, "player-float");
+        // page moves don't move the floating window
+        RectF before = new RectF(shown);
+        p.updateRect(YugiPlayer.RectUpdate.parse(new JSONObject(
+                "{\"id\":\"q\",\"rect\":{\"x\":300,\"y\":-500,\"w\":800,\"h\":450,\"sw\":1920,\"sh\":1080}}")));
+        settle();
+        assertEquals(before, p.shownForTest());
+        // dragged up and flung to the top: lands in a top corner
+        drag(p.layerForTest(), shown.centerX(), shown.centerY(), shown.centerX() - w * 0.3f, h * 0.25f);
+        settle();
+        shown = p.shownForTest();
+        assertTrue("snapped to the top " + shown, shown.top < h * 0.3f);
+        snap(decor, w, h, "player-float-top");
 
         // full screen and Back
+        p.setFloatingForTest(false);
+        settle();
         p.toggleFullForTest();
         settle();
         assertTrue(p.isFullForTest());
@@ -257,6 +352,16 @@ public class YugiPlayerTest {
         p.close(); // Back again: back to the desktop
         settle();
         assertFalse(p.isOpen());
+    }
+
+    private static void drag(View v, float x0, float y0, float x1, float y1) {
+        long t = android.os.SystemClock.uptimeMillis();
+        v.dispatchTouchEvent(MotionEvent.obtain(t, t, MotionEvent.ACTION_DOWN, x0, y0, 0));
+        for (int i = 1; i <= 8; i++) {
+            float f = i / 8f;
+            v.dispatchTouchEvent(MotionEvent.obtain(t, t + i * 12, MotionEvent.ACTION_MOVE, x0 + (x1 - x0) * f, y0 + (y1 - y0) * f, 0));
+        }
+        v.dispatchTouchEvent(MotionEvent.obtain(t, t + 8 * 12 + 4, MotionEvent.ACTION_UP, x1, y1, 0));
     }
 
     private static void settle() {
