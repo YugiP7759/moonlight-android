@@ -190,10 +190,11 @@ public class YugiUiScreenshotTest {
         chat.rerenderForTest();
         pc.addView(chat, match());
         chat.setOpen(true);
+        if (chat.cardScaleForTest() > 0.9f) problems.add("opening starts at full size (" + chat.aimInfoForTest() + ")");
         pc.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY));
         pc.layout(0, 0, w, h); // no idle: the springs must still be in flight
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(48)); // mid-flight: growing out of the orb
-        if (chat.cardScaleForTest() > 0.97f) problems.add("the card did not grow out of the orb (scale " + chat.cardScaleForTest() + " after 48ms)");
+        if (chat.cardScaleForTest() > 0.97f) problems.add("the card did not grow out of the orb (scale " + chat.cardScaleForTest() + " after 48ms; " + chat.aimInfoForTest() + ")");
         save(pc, name + "-e1a-chat-opening");
         idle();
         layout(pc, w, h);

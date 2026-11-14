@@ -975,8 +975,10 @@ public class YugiChat extends FrameLayout {
         View parent = (View) getParent();
         int w = getWidth() > 0 ? getWidth() : parent != null ? parent.getWidth() : 0;
         int h = getHeight() > 0 ? getHeight() : parent != null ? parent.getHeight() : 0;
+        aimInfo = "w=" + w + " h=" + h + " reset=" + reset;
         if (w <= 0 || h <= 0) return;
         Rect cr = cardRect(w, h);
+        aimInfo += " card=" + cr.toShortString();
         if (cr.width() <= 0 || cr.height() <= 0) return;
         Rect a = host != null ? host.anchorRect() : null;
         float px, py;
@@ -996,6 +998,7 @@ public class YugiChat extends FrameLayout {
         }
         card.setPivotX(Math.max(0, Math.min(cr.width(), px)));
         card.setPivotY(Math.max(0, Math.min(cr.height(), py)));
+        aimInfo += " anchor=" + (a == null ? "null" : a.toShortString()) + " closed=" + closedScaleX;
         if (reset) {
             cardSX.cancel();
             cardSY.cancel();
@@ -1020,6 +1023,9 @@ public class YugiChat extends FrameLayout {
 
     /** For checks / a frame mid-animation: the card's current scale. */
     float cardScaleForTest() { return card.getScaleX(); }
+
+    String aimInfo = "";
+    String aimInfoForTest() { return aimInfo + " running=" + cardSX.isRunning() + " alpha=" + card.getAlpha(); }
 
     private void focusInput() {
         if (!open || sessionsWanted) return;
