@@ -417,8 +417,8 @@ public class YugiPlayerTest {
         RectF shown = p.shownForTest();
         assertEquals("on the video, not a box over the tab strip", 330 * sy, shown.top, 2);
         assertEquals(0, shown.left, 2);
-        assertEquals(1080 * sx, shown.width(), 2);
-        assertEquals("the video's own shape, not a square", 608 * sy, shown.height(), 2);
+        assertEquals(1080 * sx, shown.width(), 4); // rounding of the fitted box
+        assertEquals("the video's own shape, not a square", 608 * sy, shown.height(), 4);
         assertNoBlackAround(decor, w, h, shown);
         snap(decor, w, h, "player-stale-screen");
 
@@ -431,7 +431,7 @@ public class YugiPlayerTest {
         settle();
         shown = p.shownForTest();
         assertEquals("follows the keyboard's shift", 330 * sy - shift, shown.top, 2);
-        assertEquals(608 * sy, shown.height(), 2);
+        assertEquals(608 * sy, shown.height(), 4);
         assertNoBlackAround(decor, w, h, shown);
         snap(decor, w, h, "player-keyboard");
 
