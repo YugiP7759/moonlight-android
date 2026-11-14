@@ -4042,7 +4042,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                     com.limelight.yugi.YugiPhoneStatus.start(Game.this); // battery / Wi-Fi / signal for the desktop bar
                     // self-measurement: battery per visit, sent to the bridge (fold re-streams stay one visit)
                     com.limelight.yugi.YugiPowerLog.streamStarted(Game.this, prefConfig.width, prefConfig.height,
-                            prefConfig.fps, prefConfig.bitrate);
+                            Math.round(prefConfig.fps), prefConfig.bitrate);
                 }
 
                 // Hide the mouse cursor now after a short delay.
