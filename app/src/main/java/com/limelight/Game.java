@@ -3636,6 +3636,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 com.limelight.yugi.YugiPcOverlay.captureFrame(streamContainer.getSurfaceView(), cb);
             }
             @Override public View streamView() { return streamContainer.getSurfaceView(); }
+            // the resolution asked of the server: the desktop is switched to it for the stream
+            @Override public int[] desktopSize() { return com.limelight.yugi.YugiPlayer.deskSize(displayWidth, displayHeight); }
             @Override public void onPlayerClosed() {
                 if (yugiRestartAfterPlayer) {
                     yugiRestartAfterPlayer = false;

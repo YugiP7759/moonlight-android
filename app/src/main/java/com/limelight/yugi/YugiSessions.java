@@ -280,7 +280,10 @@ public class YugiSessions extends FrameLayout {
         ImageButton dclose = YugiTheme.iconButton(ctx, R.drawable.yugi_ic_close, "סגור");
         dclose.setOnClickListener(v -> host.onClose());
         dhead.addView(dclose, sq(48));
-        dcol.addView(dhead, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
+        // at least 52dp, and as tall as its two lines need (a large system font): it never shrinks under them,
+        // only the messages below it give way to the keyboard
+        dhead.setMinimumHeight(dp(52));
+        dcol.addView(dhead, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         View hair = new View(ctx);
         hair.setBackgroundColor(YugiTheme.STROKE);
         dcol.addView(hair, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, dp(1))));
@@ -1231,6 +1234,9 @@ public class YugiSessions extends FrameLayout {
     }
 
     /** Ends springs at once so a screenshot shows the final state. */
+    /** The detail header, its title and status line, the hairline, the messages. */
+    View[] detailPartsForTest() { return new View[]{detailHead, detailTitle, detailSubtitle, detailHair, msgScroll}; }
+
     void settleForTest() {
         if (listX.isRunning()) listX.skipToEnd();
         if (detailX.isRunning()) detailX.skipToEnd();

@@ -311,6 +311,31 @@ public final class YugiPlayer {
                 stream.left + (d[0] + d[2]) * sx, stream.top + (d[1] + d[3]) * sy);
     }
 
+    /**
+     * The desktop rect {@code d} with the desktop's real size when the browser's screen size disagrees with it.
+     * The desktop is switched to the phone's shape when a stream starts, but a browser that was already open
+     * can keep reporting the old screen (screen.width / height), while its page rects are right in desktop
+     * pixels. Mapped with the stale size, the player became a squashed box over the tab strip.
+     * {@code dw, dh}: the desktop size ({@link #deskSize}), 0 when unknown.
+     */
+    static float[] onDesk(float[] d, int dw, int dh) {
+        if (d == null || d.length != 6 || dw <= 0 || dh <= 0 || d[5] <= 0) return d;
+        float rep = d[4] / d[5], real = (float) dw / dh;
+        if (Math.abs(rep - real) <= real * 0.02f) return d; // the browser's own size is fine (and may be finer)
+        float[] o = d.clone();
+        o[4] = dw;
+        o[5] = dh;
+        return o;
+    }
+
+    /** The desktop size the server sets for a stream of w x h: the same, capped at 2560 on the long side. */
+    public static int[] deskSize(int w, int h) {
+        if (w <= 0 || h <= 0) return null;
+        int l = Math.max(w, h);
+        if (l > 2560) { w = w * 2560 / l; h = h * 2560 / l; }
+        return new int[]{w, h};
+    }
+
     /** Share of {@code r} inside {@code clip} (0..1). */
     static float visibleFraction(RectF r, RectF clip) {
         if (r == null || clip == null || r.width() <= 0 || r.height() <= 0) return 0f;
@@ -367,7 +392,7 @@ public final class YugiPlayer {
     static String youtubeHtml(String vid, double t) {
         int start = (int) Math.floor(Math.max(0, t));
         return "<!doctype html><html><head><meta name=viewport content='width=device-width,initial-scale=1'>"
-                + "<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}#p{position:fixed;inset:0;width:100%;height:100%}</style>"
+                + "<style>html,body{margin:0;height:100%;background:transparent;overflow:hidden}#p{position:fixed;inset:0;width:100%;height:100%}</style>"
                 + "</head><body><div id=p></div><script>"
                 + "var t0=" + String.format(Locale.US, "%.3f", Math.max(0, t)) + ",pl,timer;"
                 + "function onYouTubeIframeAPIReady(){pl=new YT.Player('p',{videoId:'" + vid + "',width:'100%',height:'100%',"
@@ -411,6 +436,11 @@ public final class YugiPlayer {
         View streamView();
         /** Player fully closed (the stream may re-stream at a new size now). */
         void onPlayerClosed();
+        /**
+         * The stream's resolution {w, h} as asked of the server (the desktop is switched to it), or null. The
+         * player maps the page's rects with it, since the browser's own screen size can be stale.
+         */
+        default int[] desktopSize() { return null; }
     }
 
     // ---------------------------------------------------------------- state
@@ -499,7 +529,8 @@ public final class YugiPlayer {
 
         card = new FrameLayout(a);
         card.setLayoutDirection(View.LAYOUT_DIRECTION_LTR); // geometry below is in plain left/top pixels
-        card.setBackgroundColor(0xFF000000);
+        // no background of its own: in the page only the video is seen (never a black box around it); full
+        // screen gets its black from the scrim
         card.setPivotX(0);
         card.setPivotY(0);
         card.setClipToOutline(true);
@@ -649,7 +680,7 @@ public final class YugiPlayer {
             if (!hasSrc) full = true;
             progressSpring.animateToFinalPosition(full ? 1f : 0f);
             startContent();
-            YugiEvents.postMediaState(r.id, "opened", r.t, null);
+            YugiEvents.postMediaState(r.id, "opened", r.t, mapNote(r));
             return;
         }
         req = r;
@@ -681,7 +712,7 @@ public final class YugiPlayer {
         controls.hide(false);
         setDuck(true);
         startContent(); // load at once: the first frame comes sooner
-        YugiEvents.postMediaState(r.id, "opened", r.t, null);
+        YugiEvents.postMediaState(r.id, "opened", r.t, mapNote(r));
         ui.removeCallbacks(beat);
         ui.postDelayed(beat, BEAT_MS);
 
@@ -737,8 +768,9 @@ public final class YugiPlayer {
 
     private Bitmap cropHero(Bitmap frame, Request r) {
         if (frame == null || !r.hasRect()) return null;
-        int fx = Math.round(r.x / r.sw * frame.getWidth()), fy = Math.round(r.y / r.sh * frame.getHeight());
-        int fw = Math.round(r.w / r.sw * frame.getWidth()), fh = Math.round(r.h / r.sh * frame.getHeight());
+        float[] d = desk(new float[]{r.x, r.y, r.w, r.h, r.sw, r.sh});
+        int fx = Math.round(d[0] / d[4] * frame.getWidth()), fy = Math.round(d[1] / d[5] * frame.getHeight());
+        int fw = Math.round(d[2] / d[4] * frame.getWidth()), fh = Math.round(d[3] / d[5] * frame.getHeight());
         Rect c = new Rect(fx, fy, fx + fw, fy + fh);
         if (!c.intersect(0, 0, frame.getWidth(), frame.getHeight()) || c.width() < 4 || c.height() < 4) return null;
         try {
@@ -746,6 +778,21 @@ public final class YugiPlayer {
         } catch (Throwable t) {
             return null;
         }
+    }
+
+    /** For the bridge's log: when the page's screen size is not the desktop's, both sizes (else null). */
+    private String mapNote(Request r) {
+        int[] s = host.desktopSize();
+        if (!r.hasRect() || s == null || s.length != 2) return null;
+        float[] d = {r.x, r.y, r.w, r.h, r.sw, r.sh};
+        if (onDesk(d, s[0], s[1]) == d) return null;
+        return String.format(Locale.US, "page screen %.0fx%.0f, desktop %dx%d", r.sw, r.sh, s[0], s[1]);
+    }
+
+    /** A desktop rect in the desktop's real size (see {@link #onDesk}). */
+    private float[] desk(float[] d) {
+        int[] s = host.desktopSize();
+        return s == null || s.length != 2 ? d : onDesk(d, s[0], s[1]);
     }
 
     /** The stream view's bounds on the layer, or null. */
@@ -783,9 +830,9 @@ public final class YugiPlayer {
             out[8] = YugiTheme.dp(activity, FLOAT_RADIUS_DP);
             return true;
         }
-        RectF src = mapDesk(deskVideo, stream);
+        RectF src = mapDesk(desk(deskVideo), stream);
         if (src == null) return false;
-        RectF clip = mapDesk(deskView, stream);
+        RectF clip = mapDesk(desk(deskView), stream);
         if (clip == null) clip = new RectF(stream);
         else if (!clip.intersect(stream)) clip.set(src.left, src.top, src.left, src.top);
         // tab hidden / element gone: nothing to show in the page (the sound goes on, as in the browser)
@@ -1156,7 +1203,7 @@ public final class YugiPlayer {
         ytFallback = fallback;
         if (web == null) {
             web = new WebView(activity);
-            web.setBackgroundColor(0xFF000000);
+            web.setBackgroundColor(0x00000000); // see-through around the embed: no black box of our own
             WebSettings ws = web.getSettings();
             ws.setJavaScriptEnabled(true);
             ws.setDomStorageEnabled(true);

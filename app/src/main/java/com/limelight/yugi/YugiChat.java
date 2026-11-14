@@ -406,6 +406,9 @@ public class YugiChat extends FrameLayout {
         chipRow.setPadding(dp(2), 0, dp(2), 0);
         chipScroll = new HorizontalScrollView(ctx);
         chipScroll.setHorizontalScrollBarEnabled(false);
+        // a soft fade where the row runs past the card's edge, instead of a chip cut in half
+        chipScroll.setHorizontalFadingEdgeEnabled(true);
+        chipScroll.setFadingEdgeLength(dp(28));
         chipScroll.setOverScrollMode(OVER_SCROLL_NEVER);
         chipScroll.addView(chipRow);
         chipScroll.setVisibility(GONE);
@@ -447,7 +450,9 @@ public class YugiChat extends FrameLayout {
         private boolean swiping, swipeIgnored;
 
         private boolean sessionsShown() { return sessions != null && sessions.getVisibility() != GONE; }
-        private int chipsH() { return chips != null && chips.getVisibility() != GONE ? chips.getMeasuredHeight() + dp(8) : 0; }
+        /** Space between the chips and the header (or the session page) under them. */
+        static final int CHIPS_GAP_DP = 14;
+        private int chipsH() { return chips != null && chips.getVisibility() != GONE ? chips.getMeasuredHeight() + dp(CHIPS_GAP_DP) : 0; }
         private View content() { return sessionsShown() ? sessions : scroll; }
 
         /** A horizontal swipe on the conversation switches to the next / previous session chip. */
@@ -524,11 +529,15 @@ public class YugiChat extends FrameLayout {
             input.measure(exactW, atMost);
             int composerH = input.getMeasuredHeight();
             int afterComposer = avail - composerH;
-            boolean showHeader = afterComposer >= dp(56 + 72); // keep at least a few lines of messages
+            // the header is never squeezed under its two lines (a large system font): at least 56dp, else as
+            // tall as it needs; only the messages give way to the keyboard
+            header.measure(exactW, MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
+            int headH = Math.max(dp(56), header.getMeasuredHeight());
+            boolean showHeader = afterComposer >= headH + dp(72); // keep at least a few lines of messages
             header.setVisibility(showHeader ? VISIBLE : GONE);
             hair.setVisibility(showHeader ? VISIBLE : GONE);
             if (showHeader) {
-                header.measure(exactW, MeasureSpec.makeMeasureSpec(dp(56), MeasureSpec.EXACTLY));
+                header.measure(exactW, MeasureSpec.makeMeasureSpec(headH, MeasureSpec.EXACTLY));
                 hair.measure(exactW, MeasureSpec.makeMeasureSpec(Math.max(1, dp(1)), MeasureSpec.EXACTLY));
                 avail -= header.getMeasuredHeight() + hair.getMeasuredHeight();
             }
@@ -928,6 +937,8 @@ public class YugiChat extends FrameLayout {
 
     /** For previews/tests: the sessions panel. */
     YugiSessions sessionsForTest() { return sessions; }
+    /** header, its status line, the hairline under it, the messages, the chips (for the no-overlap checks). */
+    View[] headerPartsForTest() { return new View[]{card.header, subtitle, hair, scroll, chipScroll}; }
 
     public void toggle() { setOpen(!open); }
 

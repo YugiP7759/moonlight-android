@@ -355,6 +355,130 @@ public class YugiPlayerTest {
         assertFalse(p.isOpen());
     }
 
+    /** A portrait desktop (1080 x 1200, the Fold's inner screen) with a theatre-mode video at 0,330 1080x608. */
+    private static Bitmap portraitDesktop(int w, int h) {
+        Bitmap b = Bitmap.createBitmap(Math.max(1, w), Math.max(1, h), Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(b);
+        c.drawColor(0xFF2B2F38);
+        Paint p = new Paint();
+        float sx = w / 1080f, sy = h / 1200f;
+        p.setColor(0xFF3C4250); // tab strip + address bar
+        c.drawRect(0, 0, w, 180 * sy, p);
+        int[] cols = {Color.RED, 0xFFFF9500, Color.YELLOW, Color.GREEN, Color.BLUE, 0xFFAF52DE};
+        for (int i = 0; i < cols.length; i++) {
+            p.setColor(cols[i]);
+            c.drawRect(i * 1080f / cols.length * sx, 330 * sy, (i + 1) * 1080f / cols.length * sx, 938 * sy, p);
+        }
+        return b;
+    }
+
+    /**
+     * The screenshot bug: the browser kept its old screen size (1920 x 1080) after the desktop went 1080 x 1200
+     * for the phone, so the player became a square box over the tab strip. It must sit exactly on the video,
+     * with no black around it, and stay on it when the keyboard pushes the desktop up.
+     */
+    @Test @Config(qualifiers = "w750dp-h832dp-port-420dpi")
+    public void staysOnTheVideoWithStaleScreenAndKeyboard() throws Exception {
+        Activity a = Robolectric.buildActivity(Activity.class).setup().get();
+        FrameLayout root = new FrameLayout(a);
+        a.setContentView(root);
+        // the desktop wrapper the keyboard moves (Game's yugiDesktop), the stream inside it
+        FrameLayout wrap = new FrameLayout(a);
+        root.addView(wrap, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        View stream = new View(a) {
+            @Override protected void onDraw(Canvas c) { c.drawBitmap(portraitDesktop(getWidth(), getHeight()), 0, 0, null); }
+        };
+        wrap.addView(stream, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        View keyboard = new View(a);
+        keyboard.setBackgroundColor(0xFF202124);
+        keyboard.setVisibility(View.GONE);
+        int w = a.getResources().getDisplayMetrics().widthPixels, h = a.getResources().getDisplayMetrics().heightPixels;
+        int kbH = Math.round(h * 0.31f);
+        root.addView(keyboard, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, kbH, android.view.Gravity.BOTTOM));
+        YugiPlayer p = YugiPlayer.attach(a, new YugiPlayer.Host() {
+            @Override public void capture(YugiChat.BitmapCallback cb) { cb.onBitmap(portraitDesktop(stream.getWidth(), stream.getHeight())); }
+            @Override public View streamView() { return stream; }
+            @Override public void onPlayerClosed() {}
+            @Override public int[] desktopSize() { return YugiPlayer.deskSize(1080, 1200); }
+        });
+        View decor = a.getWindow().getDecorView();
+        layout(decor, w, h);
+        // what Brave sent: right page pixels, stale screen size
+        p.open(YugiPlayer.Request.parse(new JSONObject(
+                "{\"kind\":\"youtube\",\"id\":\"k\",\"vid\":\"FZ8tay5A2Vk\","
+                        + "\"rect\":{\"x\":0,\"y\":330,\"w\":1080,\"h\":608,\"sw\":1920,\"sh\":1080},"
+                        + "\"view\":{\"x\":0,\"y\":180,\"w\":1080,\"h\":1020,\"sw\":1920,\"sh\":1080}}")));
+        layout(decor, w, h);
+        shadowOf(Looper.getMainLooper()).idle();
+        p.firstFrameForTest();
+        settle();
+        assertFalse("opens in the page", p.isFullForTest());
+        float sx = stream.getWidth() / 1080f, sy = stream.getHeight() / 1200f;
+        RectF shown = p.shownForTest();
+        assertEquals("on the video, not a box over the tab strip", 330 * sy, shown.top, 2);
+        assertEquals(0, shown.left, 2);
+        assertEquals(1080 * sx, shown.width(), 2);
+        assertEquals("the video's own shape, not a square", 608 * sy, shown.height(), 2);
+        assertNoBlackAround(decor, w, h, shown);
+        snap(decor, w, h, "player-stale-screen");
+
+        // the keyboard opens and pushes the desktop up: the player moves with the stream, pixel for pixel
+        keyboard.setVisibility(View.VISIBLE);
+        float shift = kbH * 0.6f;
+        wrap.setTranslationY(-shift);
+        layout(decor, w, h);
+        p.layerForTest().getViewTreeObserver().dispatchOnPreDraw();
+        settle();
+        shown = p.shownForTest();
+        assertEquals("follows the keyboard's shift", 330 * sy - shift, shown.top, 2);
+        assertEquals(608 * sy, shown.height(), 2);
+        assertNoBlackAround(decor, w, h, shown);
+        snap(decor, w, h, "player-keyboard");
+
+        // and back down
+        wrap.setTranslationY(0);
+        keyboard.setVisibility(View.GONE);
+        layout(decor, w, h);
+        p.layerForTest().getViewTreeObserver().dispatchOnPreDraw();
+        settle();
+        assertEquals(330 * sy, p.shownForTest().top, 2);
+        p.close();
+        settle();
+    }
+
+    @Test
+    public void staleScreenSizeIsReplacedOnlyWhenItDisagrees() {
+        float[] stale = {0, 330, 1080, 608, 1920, 1080};
+        float[] fixed = YugiPlayer.onDesk(stale, 1080, 1200);
+        assertEquals(1080, fixed[4], 0);
+        assertEquals(1200, fixed[5], 0);
+        assertEquals("the rect itself is kept", 330, fixed[1], 0);
+        float[] fine = {0, 330, 1080, 608, 1890, 2100}; // the browser's size, same shape (a scaled desktop)
+        assertTrue(YugiPlayer.onDesk(fine, 1080, 1200) == fine);
+        assertTrue(YugiPlayer.onDesk(stale, 0, 0) == stale);
+        int[] same = YugiPlayer.deskSize(2184, 1968); // under the server's cap: as asked
+        assertEquals(2184, same[0]);
+        assertEquals(1968, same[1]);
+        assertEquals(2560, YugiPlayer.deskSize(2880, 1440)[0]);
+        assertEquals(1280, YugiPlayer.deskSize(2880, 1440)[1]);
+    }
+
+    /** No black box of ours: just outside what the player shows, the desktop is seen. */
+    private static void assertNoBlackAround(View decor, int w, int h, RectF shown) {
+        Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        decor.draw(new Canvas(b));
+        int[][] pts = {
+                {Math.round(shown.centerX()), Math.round(shown.top) - 12},
+                {Math.round(shown.centerX()), Math.round(shown.bottom) + 12},
+        };
+        for (int[] pt : pts) {
+            if (pt[1] < 0 || pt[1] >= h) continue;
+            int c = b.getPixel(Math.max(0, Math.min(w - 1, pt[0])), pt[1]);
+            assertTrue("black around the player at " + pt[0] + "," + pt[1] + " (" + Integer.toHexString(c) + ")",
+                    Color.red(c) + Color.green(c) + Color.blue(c) > 40);
+        }
+    }
+
     private static void drag(View v, float x0, float y0, float x1, float y1) {
         long t = android.os.SystemClock.uptimeMillis();
         v.dispatchTouchEvent(MotionEvent.obtain(t, t, MotionEvent.ACTION_DOWN, x0, y0, 0));
