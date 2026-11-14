@@ -51,9 +51,8 @@ public final class YugiPhoneStatus {
     private static final long MIN_INTERVAL_MS = 30_000;
     private static final long FIRST_MS = 800; // the Wi-Fi and signal callbacks report their first value
 
-    private static final Handler ui = new Handler(Looper.getMainLooper());
-    private static final OkHttpClient HTTP = new OkHttpClient.Builder()
-            .connectTimeout(3, TimeUnit.SECONDS).readTimeout(3, TimeUnit.SECONDS).build();
+    private static Handler ui;         // created in start() (keeps the class loadable in plain unit tests)
+    private static OkHttpClient http;
 
     // All state below is touched on the main thread only.
     private static Context app;
@@ -75,6 +74,9 @@ public final class YugiPhoneStatus {
         if (running) return;
         running = true;
         app = context.getApplicationContext();
+        if (ui == null) ui = new Handler(Looper.getMainLooper());
+        if (http == null) http = new OkHttpClient.Builder()
+                .connectTimeout(3, TimeUnit.SECONDS).readTimeout(3, TimeUnit.SECONDS).build();
         lastSent = null;
         lastSentAt = 0;
         try {
@@ -264,7 +266,7 @@ public final class YugiPhoneStatus {
         if (body == null || body.equals(lastSent)) return;
         lastSent = body;
         lastSentAt = SystemClock.uptimeMillis();
-        HTTP.newCall(new Request.Builder().url(YugiEvents.base() + "/phone/status")
+        http.newCall(new Request.Builder().url(YugiEvents.base() + "/phone/status")
                 .post(RequestBody.create(body, MediaType.get("application/json"))).build())
                 .enqueue(new okhttp3.Callback() {
                     @Override public void onFailure(Call call, java.io.IOException e) {
