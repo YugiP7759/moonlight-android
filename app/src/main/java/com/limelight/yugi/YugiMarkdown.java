@@ -76,11 +76,13 @@ final class YugiMarkdown {
         SpannableStringBuilder sb = new SpannableStringBuilder();
         StringBuilder code = null;
         boolean blank = false;
+        // paragraph spans go on once the block is complete (a SPAN_PARAGRAPH swallows text appended at its end)
+        List<Object[]> para = new ArrayList<>();
         for (String raw : lines) {
             if (raw.trim().startsWith("```")) {
                 if (code == null) {
                     code = new StringBuilder();
-                    flush(r, sb);
+                    flush(r, sb, para);
                     sb = new SpannableStringBuilder();
                 } else {
                     r.blocks.add(new Block(true, code.toString().replaceAll("\\n$", "")));
@@ -109,28 +111,30 @@ final class YugiMarkdown {
                 int level = Math.min(3, m.group(1).length() / 2);
                 inline(c, sb, m.group(2), r, links);
                 sb.append('\n');
-                sb.setSpan(new Marker(c, null, level), start, sb.length(), Spanned.SPAN_PARAGRAPH);
+                para.add(new Object[]{new Marker(c, null, level), start, sb.length()});
             } else if ((m = NUMBER.matcher(raw)).matches()) {
                 int level = Math.min(3, m.group(1).length() / 2);
                 inline(c, sb, m.group(3), r, links);
                 sb.append('\n');
-                sb.setSpan(new Marker(c, m.group(2) + ".", level), start, sb.length(), Spanned.SPAN_PARAGRAPH);
+                para.add(new Object[]{new Marker(c, m.group(2) + ".", level), start, sb.length()});
             } else if (raw.startsWith(">")) {
                 inline(c, sb, raw.replaceFirst("^>\\s?", ""), r, links);
                 sb.setSpan(new ForegroundColorSpan(YugiTheme.TEXT_DIM), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 sb.append('\n');
-                sb.setSpan(new Quote(c), start, sb.length(), Spanned.SPAN_PARAGRAPH);
+                para.add(new Object[]{new Quote(c), start, sb.length()});
             } else {
                 inline(c, sb, raw, r, links);
                 sb.append('\n');
             }
         }
         if (code != null) r.blocks.add(new Block(true, code.toString().replaceAll("\\n$", "")));
-        flush(r, sb);
+        flush(r, sb, para);
         return r;
     }
 
-    private static void flush(Result r, SpannableStringBuilder sb) {
+    private static void flush(Result r, SpannableStringBuilder sb, List<Object[]> para) {
+        for (Object[] p : para) sb.setSpan(p[0], (Integer) p[1], (Integer) p[2], Spanned.SPAN_PARAGRAPH);
+        para.clear();
         while (sb.length() > 0 && sb.charAt(sb.length() - 1) == '\n') sb.delete(sb.length() - 1, sb.length());
         if (sb.length() > 0) r.blocks.add(new Block(false, sb));
     }
