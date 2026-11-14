@@ -191,6 +191,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     // YugiPC state
     private boolean yugi;
     private boolean yugiRestarting;
+    private boolean yugiResizing;
     private android.widget.ImageView yugiFrozen;
     private int yugiRotation;
     private com.limelight.yugi.YugiChat yugiChat;
@@ -390,8 +391,12 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             prefConfig.showOverlayZoomToggleButton = false; // the YugiPC toolbar is the only floating control
             // no GPU on the server: never more than 60 FPS (120 in software x264 costs more than it gives)
             if (prefConfig.fps > com.limelight.yugi.YugiConfig.MAX_FPS) prefConfig.fps = com.limelight.yugi.YugiConfig.MAX_FPS;
-            prefConfig.bitrate = prefConfig.fps > 60
-                    ? com.limelight.yugi.YugiConfig.BITRATE_120_KBPS : com.limelight.yugi.YugiConfig.BITRATE_60_KBPS;
+            // Bitrate: the launcher wrote this stream's profile (YugiPower: 6 Mbps at 30 FPS by default).
+            // Anything else (an old pref, a launch from elsewhere) is capped to the frugal default.
+            com.limelight.yugi.YugiPower.Profile yp = com.limelight.yugi.YugiPower.current;
+            int ykbps = yp != null ? yp.kbps : com.limelight.yugi.YugiPower.DESKTOP_KBPS;
+            if (prefConfig.bitrate <= 0 || prefConfig.bitrate > ykbps) prefConfig.bitrate = ykbps;
+            prefConfig.meteredBitrate = Math.min(prefConfig.bitrate, com.limelight.yugi.YugiPower.METERED_KBPS);
         }
         tombstonePrefs = Game.this.getSharedPreferences("DecoderTombstone", 0);
 
@@ -530,7 +535,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             }
             com.limelight.yugi.YugiFps.reset(() -> runOnUiThread(this::yugiRestart));
             com.limelight.yugi.YugiPcOverlay overlay = com.limelight.yugi.YugiPcOverlay.attach(
-                    this, streamContainer.getSurfaceView(), this::yugiOpenGames);
+                    this, streamContainer.getSurfaceView(), this::yugiOpenGames, this::yugiRestartUnlessPlaying);
             yugiChat = overlay.chat;
             yugiOverlay = overlay;
 
@@ -635,7 +640,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             highPerfWifiLock.setReferenceCounted(false);
             highPerfWifiLock.acquire();
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // YugiPC on low battery: Wi-Fi keeps its power saving (a little more latency, much less radio)
+            boolean yugiLow = yugi && com.limelight.yugi.YugiPower.current != null
+                    && !com.limelight.yugi.YugiPower.current.lowLatencyWifi;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !yugiLow) {
                 lowLatencyWifiLock = wifiMgr.createWifiLock(WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "Moonlight Low Latency Lock");
                 lowLatencyWifiLock.setReferenceCounted(false);
                 lowLatencyWifiLock.acquire();
@@ -1880,6 +1888,12 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         if (yugiPlayer != null) yugiPlayer.release(); // the position goes back to the desktop
         if (yugiKeys != null) yugiKeys.stop(); // no event stream in the background
         com.limelight.yugi.YugiPhoneStatus.stop(); // no phone status in the background
+        if (yugi && !yugiResizing) {
+            // the stream really stops here (background, screen off, games, a drop): the visit is measured
+            com.limelight.yugi.YugiPowerLog.streamStopped(this, isFinishing() ? "closed" : "background");
+        } else if (yugi) {
+            com.limelight.yugi.YugiPowerLog.streamRestarting();
+        }
 
         SpinnerDialog.closeDialogs(this);
         Dialog.closeDialogs();
@@ -3699,6 +3713,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private void yugiRestart() {
         if (yugiRestarting) return;
         yugiRestarting = true;
+        yugiResizing = true; // the launcher re-streams at once: the battery visit stays open
         displayedFailureDialog = true; // suppress any termination dialog
         com.limelight.yugi.YugiTransition.resizeStartedAt = android.os.SystemClock.uptimeMillis();
         int newRotation = getWindowManager().getDefaultDisplay().getRotation();
@@ -4025,6 +4040,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                     }
                     com.limelight.yugi.YugiMedia.start(Game.this);
                     com.limelight.yugi.YugiPhoneStatus.start(Game.this); // battery / Wi-Fi / signal for the desktop bar
+                    // self-measurement: battery per visit, sent to the bridge (fold re-streams stay one visit)
+                    com.limelight.yugi.YugiPowerLog.streamStarted(Game.this, prefConfig.width, prefConfig.height,
+                            prefConfig.fps, prefConfig.bitrate);
                 }
 
                 // Hide the mouse cursor now after a short delay.

@@ -18,15 +18,20 @@ import java.util.concurrent.Executor;
  * The AAR is only present in private builds (it carries the auth key), so it is called by
  * reflection: without it the app falls back to the phone's Tailscale app and the direct IP.
  * With it, every Sunshine/WHIP port is forwarded on 127.0.0.1.
- * Battery: the node stops after a minute with no YugiPC screen showing and comes back when one does.
+ * Battery: the node stops 10 s after the last YugiPC screen goes away and comes back when one shows.
  */
 public final class YugiTunnel {
     private static final String CLASS = "com.yugipc.tsbridge.Tsbridge";
     public static final String LOCAL_HOST = "127.0.0.1";
     public static final long READY_TIMEOUT_MS = 25000;
 
-    /** No screen of ours showing for this long: the tailnet node stops (it keeps the radio busy). */
-    public static final long IDLE_STOP_MS = 60_000;
+    /**
+     * No screen of ours showing for this long: the tailnet node stops (it keeps the radio busy).
+     * Battery first: seconds, not a minute. A longer trip away costs a tailnet handshake on return.
+     */
+    public static final long IDLE_STOP_MS = 10_000;
+    /** No screen of ours for this long: connections that outlive a screen (the chat's answer SSE) close. */
+    public static final long HIDDEN_CLOSE_MS = 3_000;
 
     private static Class<?> cls;
     private static boolean started;
@@ -39,6 +44,7 @@ public final class YugiTunnel {
     static Executor bg = r -> new Thread(r, "yugi-tunnel").start();
     private static Context appContext;
     private static final Runnable idleStop = () -> bg.execute(YugiTunnel::stopIfIdle);
+    private static final Runnable hiddenClose = () -> { if (startedActivities == 0) YugiChat.onAppHidden(); };
 
     private YugiTunnel() {}
 
@@ -120,6 +126,7 @@ public final class YugiTunnel {
     static void onScreenStarted() {
         if (startedActivities++ > 0) return;
         main.removeCallbacks(idleStop);
+        main.removeCallbacks(hiddenClose);
         if (idleStopped && appContext != null) {
             final Context ctx = appContext;
             bg.execute(() -> { if (startedActivities > 0) ensureReady(ctx); });
@@ -131,6 +138,8 @@ public final class YugiTunnel {
         if (startedActivities == 0) {
             main.removeCallbacks(idleStop);
             main.postDelayed(idleStop, IDLE_STOP_MS);
+            main.removeCallbacks(hiddenClose);
+            main.postDelayed(hiddenClose, HIDDEN_CLOSE_MS);
         }
     }
 
@@ -154,6 +163,7 @@ public final class YugiTunnel {
         idleStopped = false;
         startedActivities = 0;
         main.removeCallbacks(idleStop);
+        main.removeCallbacks(hiddenClose);
     }
 
     /** True when the build has a Tailscale key baked in. */

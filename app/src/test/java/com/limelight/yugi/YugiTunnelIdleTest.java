@@ -22,7 +22,7 @@ import org.robolectric.annotation.Config;
 
 import java.time.Duration;
 
-/** Battery: the embedded Tailscale node stops after a minute with no screen and comes back with one. */
+/** Battery: the embedded Tailscale node stops 10 s after the last screen goes and comes back with one. */
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 34)
 public class YugiTunnelIdleTest {
@@ -41,7 +41,7 @@ public class YugiTunnelIdleTest {
     }
 
     @Test
-    public void stopsAfterAMinuteInTheBackgroundAndReconnectsOnReturn() {
+    public void stopsSecondsAfterGoingToTheBackgroundAndReconnectsOnReturn() {
         Application app = (Application) androidx.test.core.app.ApplicationProvider.getApplicationContext();
         // ArtemisApplication.onCreate already registered the watcher (it's the test app too)
         ActivityController<Activity> c = Robolectric.buildActivity(Activity.class).setup();
@@ -49,9 +49,9 @@ public class YugiTunnelIdleTest {
         assertEquals(1, Tsbridge.starts);
 
         c.pause().stop();
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(30));
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(8));
         assertEquals("stopped too early", 0, Tsbridge.stops);
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(31));
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(3));
         assertEquals(1, Tsbridge.stops);
         assertFalse(YugiTunnel.isStartedForTest());
 
@@ -68,7 +68,7 @@ public class YugiTunnelIdleTest {
         ActivityController<Activity> c = Robolectric.buildActivity(Activity.class).setup();
         assertTrue(YugiTunnel.ensureReady(app));
         c.pause().stop();
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(20));
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(6));
         c.restart().start().resume();
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(90));
         assertEquals(0, Tsbridge.stops);

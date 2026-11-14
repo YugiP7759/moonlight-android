@@ -136,6 +136,8 @@ public class YugiChat extends FrameLayout {
             .readTimeout(60, TimeUnit.SECONDS)
             .build();
     private static volatile Call activeCall;
+    /** The answer stream was cut because no YugiPC screen is showing (battery); the server finishes the turn. */
+    private static volatile boolean cutForBackground;
 
     public static boolean isChatEnabled() {
         return !BuildConfig.YUGI_CHAT_TOKEN.isEmpty();
@@ -1514,7 +1516,20 @@ public class YugiChat extends FrameLayout {
         return null;
     }
 
+    /**
+     * No YugiPC screen has shown for a few seconds (YugiTunnel's app watcher): close the answer's SSE so
+     * nothing keeps the radio awake in the background. The bridge doesn't stop the turn when the client
+     * goes away, so the full answer comes back with the history the next time the chat opens.
+     */
+    public static void onAppHidden() {
+        Call c = activeCall;
+        if (c == null) return;
+        cutForBackground = true;
+        c.cancel();
+    }
+
     private void runStream(String prompt, String display, Msg answer) {
+        cutForBackground = false;
         String error = null;
         JSONObject body = new JSONObject();
         try { body.put("text", prompt); body.put("display", display); } catch (Exception ignored) {}
@@ -1560,6 +1575,19 @@ public class YugiChat extends FrameLayout {
             LimeLog.warning("YugiChat: " + e);
         } finally {
             if (activeCall == call) activeCall = null;
+        }
+        if (call.isCanceled() && cutForBackground) {
+            cutForBackground = false;
+            ui.post(() -> {
+                // drop the partial copy: the next open reloads the conversation, answer included
+                synchronized (messages) { messages.clear(); }
+                historyLoaded = false;
+                busy = false;
+                liveRow = null;
+                refreshBusy();
+                if (open && !released) loadHistory();
+            });
+            return;
         }
         finish(answer, error);
     }

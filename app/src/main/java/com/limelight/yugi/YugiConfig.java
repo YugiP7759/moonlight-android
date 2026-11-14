@@ -21,7 +21,8 @@ public final class YugiConfig {
      * than it gives, so every profile is clamped here.
      */
     public static final int MAX_FPS = 60;
-    public static final int FPS_FALLBACK = 60;
+    /** Fallback ceiling (YugiFps); never above the frugal desktop default (YugiPower). */
+    public static final int FPS_FALLBACK = 30;
 
     /**
      * Per-screen stream profiles, measured on the server (x264 on CPU).
@@ -33,7 +34,7 @@ public final class YugiConfig {
      */
     public static final float WIDE_ASPECT = 1.6f;
     public static final float COVER_SCALE = 0.66f;
-    public static final int COVER_FPS = 60; // was 120: capped by MAX_FPS
+    public static final int COVER_FPS = 60; // ceiling; YugiPower picks the stream's FPS (30 by default)
     public static final float INNER_SCALE = 0.55f;
     public static final int INNER_FPS = 60;
 
@@ -43,9 +44,7 @@ public final class YugiConfig {
      */
     public static final boolean FPS_AUTO_FALLBACK = false;
 
-    /** Fixed bitrates (kbps): not Moonlight's automatic high default. */
-    public static final int BITRATE_60_KBPS = 10000;
-    public static final int BITRATE_120_KBPS = 15000;
+    // Bitrates and the actual FPS of a stream: YugiPower (battery first, 30 FPS / 6 Mbps by default).
 
     /**
      * Moonlight mouse mode "0" (multi-touch passthrough): finger touches are sent as native touch

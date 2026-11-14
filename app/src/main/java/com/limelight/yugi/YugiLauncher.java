@@ -75,9 +75,13 @@ public class YugiLauncher extends Activity {
         buildUi();
     }
 
+    /** Between onResume and onPause: a connect that finishes in the background never starts the stream. */
+    private boolean resumed;
+
     @Override
     protected void onResume() {
         super.onResume();
+        resumed = true;
         if (askingPermissions) return;
         if (YugiNav.connectNow) {
             // Back from the games screen: connect right away (the desktop session is still running)
@@ -135,6 +139,7 @@ public class YugiLauncher extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        resumed = false;
         if (pendingAutoRetry != null) {
             ui.removeCallbacks(pendingAutoRetry);
             pendingAutoRetry = null;
@@ -350,6 +355,11 @@ public class YugiLauncher extends Activity {
         {
             ui.post(() -> {
                 working = false;
+                if (!resumed) {
+                    // Battery: Yagel left while it connected; no stream in the background (onResume connects again)
+                    resizeLaunch = false;
+                    return;
+                }
                 launchedGame = true;
                 gameStartedAt = System.currentTimeMillis();
                 boolean seamless = resizeLaunch;
@@ -413,7 +423,7 @@ public class YugiLauncher extends Activity {
     // ---- stream size / prefs ----
 
     static final class StreamSize {
-        int width, height, fps;
+        int width, height, fps, kbps;
     }
 
     private StreamSize computeStreamSize() {
@@ -430,13 +440,16 @@ public class YugiLauncher extends Activity {
         }
         boolean wide = YugiConfig.isWide(w, h);
         float scale = (wide ? YugiConfig.COVER_SCALE : YugiConfig.INNER_SCALE) * YugiConfig.RES_SCALE;
-        int fps = wide ? YugiConfig.COVER_FPS : YugiConfig.INNER_FPS;
-        if (YugiFps.fallback || maxRefreshRate() < fps - 1) fps = YugiConfig.FPS_FALLBACK;
-        fps = Math.min(fps, YugiConfig.MAX_FPS);
+        int maxFps = Math.min(YugiConfig.MAX_FPS, Math.round(maxRefreshRate()));
+        if (YugiFps.fallback) maxFps = Math.min(maxFps, YugiConfig.FPS_FALLBACK);
+        // Battery first: 30 FPS / 6 Mbps by default, smaller and slower on low battery (YugiPower)
+        YugiPower.Profile p = YugiPower.choose(this, Math.round(Math.min(w, h) * scale), maxFps);
+        scale *= p.scale;
         StreamSize s = new StreamSize();
         s.width = YugiConfig.align(w * scale);
         s.height = YugiConfig.align(h * scale);
-        s.fps = fps;
+        s.fps = p.fps;
+        s.kbps = p.kbps;
         return s;
     }
 
@@ -462,12 +475,13 @@ public class YugiLauncher extends Activity {
                 .putString("list_video_scale_mode", "stretch")
                 .putBoolean("checkbox_full_screen", true)
                 .putBoolean("checkbox_unlock_fps", s.fps > 60)
-                // Battery: a 60 FPS stream asks the panel for 60 Hz (not 120). Our UI animations still vote
-                // for 120 Hz on their own layers, so springs and touch stay at the high rate.
+                // Battery: the panel goes to the lowest mode that fits the stream (60 Hz, not 120). Our UI
+                // animations still vote for 120 Hz on their own layers, so springs and touch stay fluid.
                 .putBoolean("checkbox_reduce_refresh_rate", true)
                 .putBoolean("checkbox_enable_microphone", false)
                 .putBoolean("checkbox_enable_quit_dialog", false)
-                .putInt("seekbar_bitrate_kbps", s.fps > 60 ? YugiConfig.BITRATE_120_KBPS : YugiConfig.BITRATE_60_KBPS)
+                .putInt("seekbar_bitrate_kbps", s.kbps)
+                .putInt("seekbar_metered_bitrate_kbps", Math.min(s.kbps, YugiPower.METERED_KBPS))
                 .putString("mouse_mode_list", YugiConfig.MOUSE_MODE)
                 .putBoolean("checkbox_multi_touch_gestures", false)
                 .putBoolean("checkbox_enable_commit_text", false) // no phone keyboard
