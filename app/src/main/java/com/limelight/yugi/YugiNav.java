@@ -46,27 +46,6 @@ public final class YugiNav {
         from.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
     }
 
-    /** Package of the local games engine (GameNative build, separate APK for now). */
-    public static final String PHONE_GAMES_PACKAGE = "com.yugi.pc.games";
-    /** Where the test build is served over Tailscale while it is not inside YugiPC. */
-    public static final String PHONE_GAMES_APK_URL = "http://100.104.166.48:8822/YugiPC-games-test.apk";
-
-    /** "בטלפון": Steam games running on the phone's own GPU (YugiPC Games); offers the APK when it is missing. */
-    public static void openPhoneGames(Activity from) {
-        Intent i = from.getPackageManager().getLaunchIntentForPackage(PHONE_GAMES_PACKAGE);
-        if (i == null) {
-            android.widget.Toast.makeText(from, "YugiPC Games עוד לא מותקנת. מורידים אותה עכשיו", android.widget.Toast.LENGTH_LONG).show();
-            i = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(PHONE_GAMES_APK_URL));
-        }
-        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        try {
-            from.startActivity(i);
-            from.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
-        } catch (android.content.ActivityNotFoundException e) {
-            android.widget.Toast.makeText(from, "אי אפשר לפתוח את YugiPC Games", android.widget.Toast.LENGTH_LONG).show();
-        }
-    }
-
     public static void openPc(Activity from) {
         connectNow = true;
         Intent i = new Intent(from, YugiLauncher.class);
