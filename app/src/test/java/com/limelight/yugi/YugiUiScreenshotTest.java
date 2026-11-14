@@ -190,11 +190,16 @@ public class YugiUiScreenshotTest {
         chat.rerenderForTest();
         pc.addView(chat, match());
         chat.setOpen(true);
-        if (chat.cardScaleForTest() > 0.9f) problems.add("opening starts at full size (" + chat.aimInfoForTest() + ")");
+        // it starts folded into the orb: small, and pivoting on the orb's centre
+        if (chat.cardScaleForTest() > 0.3f) problems.add("opening starts too big (" + chat.aimInfoForTest() + ")");
+        Rect orbR = pcChrome.primaryRect();
+        Rect cardR0 = chat.cardRect(w, h);
+        float[] pv = chat.pivotForTest();
+        if (orbR != null && !orbR.contains(Math.round(cardR0.left + pv[0]), Math.round(cardR0.top + pv[1])))
+            problems.add("the card doesn't grow from the orb: pivot " + (cardR0.left + pv[0]) + "," + (cardR0.top + pv[1]) + " orb " + orbR.toShortString());
         pc.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY));
-        pc.layout(0, 0, w, h); // no idle: the springs must still be in flight
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(48)); // mid-flight: growing out of the orb
-        if (chat.cardScaleForTest() > 0.97f) problems.add("the card did not grow out of the orb (scale " + chat.cardScaleForTest() + " after 48ms; " + chat.aimInfoForTest() + ")");
+        pc.layout(0, 0, w, h);
+        chat.freezeOpeningForTest(0.45f); // a frame mid-flight
         save(pc, name + "-e1a-chat-opening");
         idle();
         layout(pc, w, h);

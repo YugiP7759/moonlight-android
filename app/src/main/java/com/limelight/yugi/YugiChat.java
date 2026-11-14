@@ -1027,6 +1027,19 @@ public class YugiChat extends FrameLayout {
     String aimInfo = "";
     String aimInfoForTest() { return aimInfo + " running=" + cardSX.isRunning() + " alpha=" + card.getAlpha(); }
 
+    /** The card's pivot in its own coordinates (where it grows from). */
+    float[] pivotForTest() { return new float[]{card.getPivotX(), card.getPivotY()}; }
+
+    /** Freezes the opening at fraction t (0 = folded in the orb, 1 = open), for a mid-flight screenshot. */
+    void freezeOpeningForTest(float t) {
+        cardSX.cancel();
+        cardSY.cancel();
+        YugiSpring.of(card, androidx.dynamicanimation.animation.DynamicAnimation.ALPHA).cancel();
+        card.setScaleX(closedScaleX + (1f - closedScaleX) * t);
+        card.setScaleY(closedScaleY + (1f - closedScaleY) * t);
+        card.setAlpha(Math.min(1f, t * 1.6f));
+    }
+
     private void focusInput() {
         if (!open || sessionsWanted) return;
         input.requestFocus();
