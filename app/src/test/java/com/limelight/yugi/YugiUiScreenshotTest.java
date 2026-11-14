@@ -200,6 +200,7 @@ public class YugiUiScreenshotTest {
         pc.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY));
         pc.layout(0, 0, w, h);
         chat.freezeOpeningForTest(0.45f); // a frame mid-flight
+        pcChrome.setAlpha(0.3f); // the bar folds away at the same time (its own spring, faster)
         save(pc, name + "-e1a-chat-opening");
         idle();
         layout(pc, w, h);
