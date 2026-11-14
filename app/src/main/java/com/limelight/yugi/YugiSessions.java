@@ -609,6 +609,13 @@ public class YugiSessions extends FrameLayout {
         refreshStatus(list);
     }
 
+    /** Message preview as plain text: Markdown marks (*, **, `, #, [text](url)) removed. */
+    private static String previewText(String md) {
+        String t = YugiMarkdown.plain(md);
+        t = t.replaceAll("!?\\[([^\\]]*)\\]\\([^)]*\\)", "$1").replaceAll("[*`]+", "").replaceAll("(^|\\s)#{1,6}\\s+", "$1");
+        return t.replaceAll("\\s+", " ").trim();
+    }
+
     private void refreshStatus(JSONArray list) {
         int working = 0, total = 0;
         JSONArray shown = Hidden.filter(getContext(), list);
@@ -618,8 +625,14 @@ public class YugiSessions extends FrameLayout {
             total++;
             if ("working".equals(o.optString("state"))) working++;
         }
-        listStatus.setText(total == 0 ? "אין סשנים פעילים בשרת"
-                : (total == 1 ? "סשן אחד בשרת" : total + " סשנים בשרת") + (working > 0 ? " · " + working + " עובדים עכשיו" : ""));
+        JSONObject appRow = host.appChat();
+        if (appRow != null && (!Hidden.isHidden(getContext(), APP_CHAT_NAME) || "working".equals(appRow.optString("state")))) {
+            total++;
+            if ("working".equals(appRow.optString("state"))) working++;
+        }
+        String count = total == 1 ? "סשן אחד" : total + " סשנים";
+        String live = working == 1 ? "אחד עובד עכשיו" : working + " עובדים עכשיו";
+        listStatus.setText(total == 0 ? "אין סשנים פעילים בשרת" : count + " בשרת" + (working > 0 ? " · " + live : ""));
         int hidden = Hidden.count(getContext(), list) + (Hidden.isHidden(getContext(), APP_CHAT_NAME) ? 1 : 0);
         hiddenFooter.setVisibility(hidden > 0 ? VISIBLE : GONE);
         hiddenFooter.setText(hidden == 1 ? "סשן אחד מוסתר · הצג" : hidden + " סשנים מוסתרים · הצג");
@@ -687,7 +700,7 @@ public class YugiSessions extends FrameLayout {
         JSONObject last = s.optJSONObject("lastMessage");
         if (last != null) {
             String who = "user".equals(last.optString("role")) ? "אתה: " : "";
-            TextView lm = YugiTheme.text(c, who + YugiMarkdown.plain(last.optString("text")), 14, 400, YugiTheme.TEXT_DIM);
+            TextView lm = YugiTheme.text(c, who + previewText(last.optString("text")), 14, 400, YugiTheme.TEXT_DIM);
             lm.setMaxLines(2);
             lm.setEllipsize(TextUtils.TruncateAt.END);
             lm.setLineSpacing(0, 1.2f);
