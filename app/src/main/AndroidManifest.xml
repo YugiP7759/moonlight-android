@@ -122,17 +122,7 @@
             <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
 
         </activity>
-        <!-- YugiPC: "משחקים" (Boosteroid in a WebView with our own gamepad) -->
-        <activity
-            android:name=".yugi.GamesActivity"
-            android:exported="false"
-            android:label="משחקים"
-            android:hardwareAccelerated="true"
-            android:resizeableActivity="true"
-            android:screenOrientation="fullSensor"
-            android:theme="@style/YugiPC.Screen"
-            android:windowSoftInputMode="adjustNothing"
-            android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection|density" />
+        <!-- YugiPC: the games screen (.yugi.GamesActivity, Boosteroid) is not registered: no gaming for now. -->
         <!-- YugiPC: file picker host for the Yugi chat -->
         <activity
             android:name=".yugi.YugiPickActivity"

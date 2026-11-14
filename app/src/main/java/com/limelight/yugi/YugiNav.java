@@ -39,13 +39,6 @@ public final class YugiNav {
         public static Item section(String label) { return new Item(label, false, true, null); }
     }
 
-    public static void openGames(Activity from) {
-        Intent i = new Intent(from, GamesActivity.class);
-        i.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
-        from.startActivity(i);
-        from.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
-    }
-
     public static void openPc(Activity from) {
         connectNow = true;
         Intent i = new Intent(from, YugiLauncher.class);

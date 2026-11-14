@@ -23,12 +23,8 @@ public final class YugiPcOverlay {
 
     private YugiPcOverlay() {}
 
-    public static YugiPcOverlay attach(Activity a, SurfaceView surface, Runnable openGames) {
-        return attach(a, surface, openGames, null);
-    }
-
-    /** {@code restream}: re-streams with the current profile (the menu's smooth-motion switch). */
-    public static YugiPcOverlay attach(Activity a, SurfaceView surface, Runnable openGames, Runnable restream) {
+    /** {@code restream}: re-streams with the current profile (the menu's smooth-motion switch); may be null. */
+    public static YugiPcOverlay attach(Activity a, SurfaceView surface, Runnable restream) {
         YugiPcOverlay o = new YugiPcOverlay();
         List<YugiChrome.Button> buttons = new ArrayList<>();
         // יוגי: the chrome's primary orb (one floating control); the chat grows out of it
@@ -50,7 +46,7 @@ public final class YugiPcOverlay {
             buttons.add(new YugiChrome.Button(R.drawable.yugi_ic_switch_camera, "החלפת מצלמה", YugiMedia::switchCamera));
         }
         buttons.add(new YugiChrome.Button(R.drawable.yugi_ic_menu, "תפריט", () ->
-                YugiNav.showPanel(a, menuItems(openGames, restream), o.chrome.getReservedTop())));
+                YugiNav.showPanel(a, menuItems(restream), o.chrome.getReservedTop())));
         o.chrome = YugiChrome.attach(a, buttons, YugiChat.isChatEnabled() ? yugi : null);
         if (mic[0] != null) {
             YugiMedia.Listener ml = (micOn, camOn) -> {
@@ -82,10 +78,9 @@ public final class YugiPcOverlay {
      * The menu. Battery first: the desktop streams at 30 FPS; "תנועה חלקה" asks for 60 until the app
      * closes (a re-stream: the protocol can't change FPS inside a stream). On low battery it stays at 30.
      */
-    static List<YugiNav.Item> menuItems(Runnable openGames, Runnable restream) {
+    static List<YugiNav.Item> menuItems(Runnable restream) {
         List<YugiNav.Item> items = new ArrayList<>();
-        items.add(new YugiNav.Item("המחשב שלי", true, null));
-        items.add(new YugiNav.Item("משחקים", false, openGames));
+        items.add(new YugiNav.Item("המחשב שלי", true, null)); // no games screen for now
         if (restream != null) {
             boolean on = YugiPower.smooth;
             items.add(new YugiNav.Item(on ? "חזרה לחיסכון בסוללה" : "תנועה חלקה (צורך יותר סוללה)", false, () -> {

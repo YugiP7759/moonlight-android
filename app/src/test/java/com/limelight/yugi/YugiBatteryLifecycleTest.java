@@ -81,38 +81,6 @@ public class YugiBatteryLifecycleTest {
     }
 
     @Test
-    public void gamesScreenBlanksBoosteroidOnStopAndReloadsOnStart() {
-        ActivityController<GamesActivity> c = Robolectric.buildActivity(GamesActivity.class).setup();
-        GamesActivity a = c.get();
-        WebView web = find(a.getWindow().getDecorView(), WebView.class);
-        assertEquals(GamesActivity.URL, web.getUrl());
-
-        c.pause().stop();
-        assertEquals("Boosteroid keeps streaming in the background", "about:blank", web.getUrl());
-
-        c.restart().start().resume();
-        assertEquals(GamesActivity.URL, web.getUrl());
-        c.pause().stop().destroy();
-    }
-
-    @Test
-    public void filePickerTripKeepsTheGame() throws Exception {
-        ActivityController<GamesActivity> c = Robolectric.buildActivity(GamesActivity.class).setup();
-        GamesActivity a = c.get();
-        WebView web = find(a.getWindow().getDecorView(), WebView.class);
-        java.lang.reflect.Field f = GamesActivity.class.getDeclaredField("pickingFile");
-        f.setAccessible(true);
-        f.setBoolean(a, true); // as the chat's attach button does before opening the picker
-        c.pause().stop();
-        assertEquals("the file picker must not kill the game", GamesActivity.URL, web.getUrl());
-        c.restart().start().resume();
-        assertFalse(f.getBoolean(a));
-        c.pause().stop();
-        assertEquals("about:blank", web.getUrl());
-        c.destroy();
-    }
-
-    @Test
     public void gyroOffWhileHostPaused() {
         Activity a = Robolectric.buildActivity(Activity.class).setup().get();
         SensorManager sm = (SensorManager) a.getSystemService(Context.SENSOR_SERVICE);

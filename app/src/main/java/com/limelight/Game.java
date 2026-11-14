@@ -535,7 +535,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             }
             com.limelight.yugi.YugiFps.reset(() -> runOnUiThread(this::yugiRestart));
             com.limelight.yugi.YugiPcOverlay overlay = com.limelight.yugi.YugiPcOverlay.attach(
-                    this, streamContainer.getSurfaceView(), this::yugiOpenGames, this::yugiRestartUnlessPlaying);
+                    this, streamContainer.getSurfaceView(), this::yugiRestartUnlessPlaying);
             yugiChat = overlay.chat;
             yugiOverlay = overlay;
 
@@ -3698,15 +3698,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         float now = (float) w / h;
         float stream = (float) prefConfig.width / prefConfig.height;
         return Math.abs(now / stream - 1f) > 0.03f;
-    }
-
-    /** YugiPC: switch to the games screen. The desktop session keeps running on the server (no quit). */
-    private void yugiOpenGames() {
-        yugiRestarting = true;
-        displayedFailureDialog = true;
-        com.limelight.yugi.YugiNav.openGames(this);
-        stopConnection();
-        finish();
     }
 
     /** YugiPC: freeze the last frame, end this stream quietly, and let the launcher re-stream at the new size/FPS. */

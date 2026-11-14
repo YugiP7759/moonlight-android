@@ -91,15 +91,16 @@ public class YugiPowerTest {
 
     @Test public void menuSwitchFlipsSmoothAndRestreams() {
         int[] restreams = {0};
-        List<YugiNav.Item> items = YugiPcOverlay.menuItems(() -> {}, () -> restreams[0]++);
-        assertEquals(3, items.size());
-        items.get(2).action.run();
+        List<YugiNav.Item> items = YugiPcOverlay.menuItems(() -> restreams[0]++);
+        assertEquals(2, items.size());
+        for (YugiNav.Item it : items) assertFalse("no games entry", it.label.contains("משחקים"));
+        items.get(1).action.run();
         assertTrue(YugiPower.smooth);
         assertEquals(1, restreams[0]);
-        YugiPcOverlay.menuItems(() -> {}, () -> restreams[0]++).get(2).action.run();
+        YugiPcOverlay.menuItems(() -> restreams[0]++).get(1).action.run();
         assertFalse(YugiPower.smooth);
         assertEquals(2, restreams[0]);
-        assertEquals("no restream hook: no switch", 2, YugiPcOverlay.menuItems(() -> {}, null).size());
+        assertEquals("no restream hook: no switch", 1, YugiPcOverlay.menuItems(null).size());
     }
 
     @Test public void aVisitSpansFoldRestreamsAndIsLoggedOnce() throws Exception {
